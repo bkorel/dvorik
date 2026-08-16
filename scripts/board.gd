@@ -336,7 +336,7 @@ func _update_pond_props() -> void:
 
 
 func walkable_cells() -> Array:
-	# Дорога или клетка ортогонально у дома. Без захода внутрь дома.
+	# Дорога или клетка ортогонально у дома. В дома не заходят.
 	var roads := false
 	var out: Array = []
 	for cell in _cells:
@@ -344,7 +344,6 @@ func walkable_cells() -> Array:
 			roads = true
 			out.append(Vector2i(cell.grid_x, cell.grid_y))
 	if roads:
-		# Вдоль домов: пустые/дорога рядом с домом уже частично; добавим EMPTY у дома.
 		for cell in _cells:
 			if cell.tile != TileType.EMPTY:
 				continue
@@ -354,7 +353,7 @@ func walkable_cells() -> Array:
 				if gp not in out:
 					out.append(gp)
 		return out
-	# Нет дорог — толкутся у стартового дома.
+	# Нет дорог — толкутся у стартового дома (не на клетке дома).
 	var near: Array = []
 	for d in ORTHO:
 		var n: Vector2i = START_HOUSE + d
@@ -365,7 +364,13 @@ func walkable_cells() -> Array:
 		if _in_bounds(n2) and _cell_at(n2).tile != TileType.HOUSE:
 			near.append(n2)
 	if near.is_empty():
-		near.append(START_HOUSE)
+		# Любая пустая рядом по Манхэттену.
+		for cell in _cells:
+			if cell.tile == TileType.HOUSE:
+				continue
+			var gp := Vector2i(cell.grid_x, cell.grid_y)
+			if absi(gp.x - START_HOUSE.x) + absi(gp.y - START_HOUSE.y) <= 2:
+				near.append(gp)
 	return near
 
 

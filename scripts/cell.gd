@@ -212,19 +212,20 @@ func _draw_house() -> void:
 	_poly(PackedVector2Array([tl, tb, fb, fl]), _lit(TileType.WALL_SIDE))
 	_poly(PackedVector2Array([tr, tb, fb, fr]), _lit(TileType.WALL_FRONT))
 	# Дверь на передней (SE) грани — читается с телефона.
-	var door_w := hw * 0.32
-	var door_h := wall_h * 0.62
-	var door_c := tb.lerp(fb, 0.55) + Vector2(hw * 0.18, 0.0)
+	var door_w := hw * 0.36
+	var door_h := wall_h * 0.68
+	var door_c := tb.lerp(fb, 0.52) + Vector2(hw * 0.20, 0.0)
 	_poly(PackedVector2Array([
 		door_c + Vector2(-door_w * 0.4, -door_h),
 		door_c + Vector2(door_w * 0.55, -door_h * 0.9),
-		door_c + Vector2(door_w * 0.55, door_h * 0.05),
-		door_c + Vector2(-door_w * 0.4, door_h * 0.15),
+		door_c + Vector2(door_w * 0.55, door_h * 0.08),
+		door_c + Vector2(-door_w * 0.4, door_h * 0.18),
 	]), _lit(TileType.DOOR))
-	draw_circle(door_c + Vector2(door_w * 0.28, -door_h * 0.25), 1.6, _lit(TileType.DOOR_EDGE))
-	# Два окна: бок + фасад.
-	_window_at(tl.lerp(tb, 0.45) + Vector2(0.0, -wall_h * 0.42), hw * 0.18)
-	_window_at(tr.lerp(tb, 0.35) + Vector2(hw * 0.02, -wall_h * 0.48), hw * 0.17)
+	draw_circle(door_c + Vector2(door_w * 0.28, -door_h * 0.25), 2.0, _lit(TileType.DOOR_EDGE))
+	# Два окна: боковая стена + фасад — крупные, голубые.
+	_window_at(tl.lerp(tb, 0.42) + Vector2(hw * 0.02, -wall_h * 0.48), hw * 0.22)
+	_window_at(tr.lerp(tb, 0.40) + Vector2(hw * 0.06, -wall_h * 0.52), hw * 0.20)
+
 	# Крыша: два ската. Улочка — отдельные коньки / общий конёк, не длинный брусок.
 	var ridge_h := wall_h * 0.55
 	var peak := tn + Vector2(0.0, -ridge_h)
@@ -323,7 +324,7 @@ func _yard_at(p: Vector2, peg_r: float, bush_r: float) -> void:
 
 func _draw_road() -> void:
 	# Полосы к ортогональным соседям-дорогам; изгиб в стыке, не отдельный тип.
-	# «Вертикаль» уходит в глубину ромба, не тот же горизонтальный штамп.
+	# «Вертикаль» (N/W) уходит в глубину — уже и темнее, не тот же горизонтальный штамп.
 	var c := iso_c + Vector2(0.0, -iso_th * 0.15)
 	var hw := iso_hw * 0.92
 	var hh := iso_hh * 0.92
@@ -331,6 +332,7 @@ func _draw_road() -> void:
 	var col := _lit(TileType.PATH_SHADE if shaded else TileType.ROAD_COL)
 	var lit := _lit(TileType.ROAD_LIT if not shaded else TileType.PATH_SHADE)
 	var groove := _lit(TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE)
+	var depth_col := col.darkened(0.12)
 	var links: Array[String] = []
 	if edge_n == TileType.ROAD:
 		links.append("n")
@@ -341,13 +343,15 @@ func _draw_road() -> void:
 	if edge_w == TileType.ROAD:
 		links.append("w")
 	if links.is_empty():
-		# Одинокая плита — короткая полоса в глубину (NW–SE).
-		_road_strip(c + Vector2(-hw * 0.35, -hh * 0.15), c + Vector2(hw * 0.35, hh * 0.15), hw * 0.28, col, lit, groove)
+		# Одинокая плита — полоса в глубину (к дальнему ребру).
+		_road_strip(c + Vector2(-hw * 0.15, hh * 0.25), c + Vector2(hw * 0.35, -hh * 0.25), hw * 0.26, depth_col, lit, groove)
 	else:
-		# Узел в центре + рукава к рёбрам.
-		_poly(Iso.diamond(c, hw * 0.22, hh * 0.22), col)
+		_poly(Iso.diamond(c, hw * 0.24, hh * 0.24), col)
 		for e in links:
-			_road_strip(c, Iso.edge_mid(c, hw, hh, e), hw * 0.30, col, lit, groove)
+			var into_depth := e == "n" or e == "w"
+			var half := hw * (0.24 if into_depth else 0.32)
+			var strip_col := depth_col if into_depth else col
+			_road_strip(c, Iso.edge_mid(c, hw, hh, e), half, strip_col, lit, groove)
 	_draw_puddles(c, hw, hh)
 	if _flashing(DvorikSave.VIEW_PATH) and shaded:
 		_poly(Iso.diamond(c, hw * 0.35, hh * 0.35), _sheen(_flash_a(0.55)))
@@ -457,77 +461,82 @@ func _draw_tree() -> void:
 
 
 func _draw_water() -> void:
-	# Пруд = одно тёмное зеркало. На стыке с водой слой доходит до ребра.
+	# Пруд = одно тёмное зеркало. На стыке с водой — мост без обода.
 	var c := iso_c + Vector2(0.0, -iso_th * 0.05)
-	var hw := iso_hw * 0.88
-	var hh := iso_hh * 0.88
+	var hw := iso_hw * 0.98
+	var hh := iso_hh * 0.98
 	var open_n := edge_n != TileType.WATER
 	var open_e := edge_e != TileType.WATER
 	var open_s := edge_s != TileType.WATER
 	var open_w := edge_w != TileType.WATER
-	var inset := 0.14
-	var hw_i := hw * (1.0 - inset * 0.5)
-	var hh_i := hh * (1.0 - inset * 0.5)
-	# Расширение к соседям-воде: сдвигаем центр и тянем ромб.
-	var pull := Vector2.ZERO
-	var sx := 1.0
-	var sy := 1.0
-	if not open_n:
-		pull += Vector2(hw * 0.18, -hh * 0.18)
-		sx = maxf(sx, 1.12)
-		sy = maxf(sy, 1.12)
-	if not open_e:
-		pull += Vector2(hw * 0.18, hh * 0.18)
-		sx = maxf(sx, 1.12)
-		sy = maxf(sy, 1.12)
-	if not open_s:
-		pull += Vector2(-hw * 0.18, hh * 0.18)
-		sx = maxf(sx, 1.12)
-		sy = maxf(sy, 1.12)
-	if not open_w:
-		pull += Vector2(-hw * 0.18, -hh * 0.18)
-		sx = maxf(sx, 1.12)
-		sy = maxf(sy, 1.12)
-	var pc := c + pull * 0.35
-	var top := _scaled_diamond(pc, hw * sx, hh * sy)
-	var deep := _scaled_diamond(pc, hw_i * sx, hh_i * sy)
-	# Обод только на открытых сторонах — рисуем полную кромку, глубь перекрывает стыки.
-	_poly(top, _lit(TileType.WATER_RIM if (open_n or open_e or open_s or open_w) else TileType.WATER_DEEP))
-	_poly(deep, _lit(TileType.WATER_DEEP))
-	var inner := _scaled_diamond(pc + Vector2(0, hh * 0.04), hw_i * sx * 0.82, hh_i * sy * 0.82)
-	_poly(inner, _lit(TileType.WATER_COL))
-	# Блик.
-	draw_set_transform(pc + Vector2(-hw * 0.2, -hh * 0.15), 0.0, Vector2(1.4, 0.45))
-	draw_circle(Vector2.ZERO, iso_hw * 0.08, _lit(TileType.WATER_GLOSS))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	_draw_reflections(pc, hw, hh)
-	_draw_reeds(pc, hw, hh)
+	var pond := not (open_n and open_e and open_s and open_w)
+	var deep := _lit(TileType.WATER_DEEP)
+	var body := _lit(TileType.WATER_COL)
+	if pond:
+		_poly(Iso.diamond(c, hw * 1.06, hh * 1.06), deep)
+		if not open_n:
+			_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "n"), hw * 0.48, hh * 0.48), deep)
+		if not open_e:
+			_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "e"), hw * 0.48, hh * 0.48), deep)
+		if not open_s:
+			_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "s"), hw * 0.48, hh * 0.48), deep)
+		if not open_w:
+			_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "w"), hw * 0.48, hh * 0.48), deep)
+		_poly(Iso.diamond(c + Vector2(0.0, hh * 0.04), hw * 0.70, hh * 0.70), body)
+	else:
+		_poly(Iso.diamond(c, hw * 0.92, hh * 0.92), _lit(TileType.WATER_RIM))
+		_poly(Iso.diamond(c, hw * 0.78, hh * 0.78), deep)
+		_poly(Iso.diamond(c + Vector2(0.0, hh * 0.03), hw * 0.62, hh * 0.62), body)
+	# Обод только с открытых сторон — не между двумя водами.
+	if pond:
+		_water_open_rim(c, hw * 0.92, hh * 0.92, open_n, open_e, open_s, open_w)
+	# Блик: на пруду один тихий, чтобы не дробить пятно.
+	if show_lily or not pond:
+		draw_set_transform(c + Vector2(-hw * 0.18, -hh * 0.12), 0.0, Vector2(1.35, 0.42))
+		draw_circle(Vector2.ZERO, iso_hw * (0.07 if pond else 0.08), _lit(TileType.WATER_GLOSS))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_draw_reflections(c, hw, hh)
+	_draw_reeds(c, hw, hh)
 	if show_lily:
-		_draw_lily(pc + Vector2(hw * 0.15, hh * 0.05))
+		_draw_lily(c + Vector2(hw * 0.20, hh * 0.02))
 	if show_duck:
-		_draw_duck(pc + Vector2(-hw * 0.1, hh * 0.12))
+		_draw_duck(c + Vector2(-hw * 0.02, hh * 0.08))
 	if _flashing(DvorikSave.VIEW_POND) or _flashing(DvorikSave.VIEW_REEDS):
-		_poly(_scaled_diamond(pc, hw * sx * 1.02, hh * sy * 1.02), _sheen(_flash_a(0.45)))
+		_poly(Iso.diamond(c, hw * 1.05, hh * 1.05), _sheen(_flash_a(0.45)))
 
 
-func _scaled_diamond(c: Vector2, hw: float, hh: float) -> PackedVector2Array:
-	return Iso.diamond(c, hw, hh)
+func _water_open_rim(c: Vector2, hw: float, hh: float, open_n: bool, open_e: bool, open_s: bool, open_w: bool) -> void:
+	var rim := _lit(TileType.WATER_RIM)
+	var n := c + Vector2(0.0, -hh)
+	var e := c + Vector2(hw, 0.0)
+	var s := c + Vector2(0.0, hh)
+	var w := c + Vector2(-hw, 0.0)
+	# Рёбра ромба: N-E, E-S, S-W, W-N соответствуют соседям n, e, s, w.
+	if open_n:
+		draw_line(n, e, rim, 2.2)
+	if open_e:
+		draw_line(e, s, rim, 2.2)
+	if open_s:
+		draw_line(s, w, rim, 2.2)
+	if open_w:
+		draw_line(w, n, rim, 2.2)
+
 
 
 func _draw_lily(p: Vector2) -> void:
-	draw_set_transform(p, 0.0, Vector2(1.4, 0.7))
-	draw_circle(Vector2.ZERO, iso_hw * 0.09, _lit(TileType.LILY_PAD))
-	draw_set_transform(p + Vector2(2, -2), 0.0, Vector2.ONE)
-	draw_circle(Vector2.ZERO, iso_hw * 0.035, _lit(TileType.LILY_FLOWER))
+	draw_set_transform(p, 0.0, Vector2(1.55, 0.75))
+	draw_circle(Vector2.ZERO, iso_hw * 0.11, _lit(TileType.LILY_PAD))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_circle(p + Vector2(1.5, -3.0), iso_hw * 0.045, _lit(TileType.LILY_FLOWER))
 
 
 func _draw_duck(p: Vector2) -> void:
-	draw_set_transform(p, 0.0, Vector2(1.2, 0.85))
-	draw_circle(Vector2.ZERO, iso_hw * 0.07, _lit(TileType.DUCK_BODY))
+	var s := iso_hw * 0.095
+	draw_set_transform(p, 0.0, Vector2(1.25, 0.85))
+	draw_circle(Vector2.ZERO, s, _lit(TileType.DUCK_BODY))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_circle(p + Vector2(iso_hw * 0.07, -iso_hw * 0.04), iso_hw * 0.045, _lit(TileType.DUCK_HEAD))
-	draw_circle(p + Vector2(iso_hw * 0.11, -iso_hw * 0.03), iso_hw * 0.02, _lit(TileType.DUCK_BILL))
+	draw_circle(p + Vector2(s * 0.95, -s * 0.55), s * 0.58, _lit(TileType.DUCK_HEAD))
+	draw_circle(p + Vector2(s * 1.45, -s * 0.4), s * 0.28, _lit(TileType.DUCK_BILL))
 
 
 func _draw_reflections(c: Vector2, hw: float, hh: float) -> void:
@@ -572,13 +581,15 @@ func _reeds_at(base: Vector2, outward: Vector2) -> void:
 	var o := outward.normalized()
 	var perp := Vector2(-o.y, o.x)
 	var m := iso_hw
-	var a := base + perp * m * 0.04
-	var b := base - perp * m * 0.05
-	var tip_a := a + o * m * 0.18 + perp * m * 0.02
-	var tip_b := b + o * m * 0.15 - perp * m * 0.015
+	var a := base + perp * m * 0.05
+	var b := base - perp * m * 0.06
+	var tip_a := a + o * m * 0.26 + perp * m * 0.03
+	var tip_b := b + o * m * 0.22 - perp * m * 0.02
+	var tip_c := base + o * m * 0.20
 	if _flashing(DvorikSave.VIEW_REEDS):
 		var glow := _sheen(_flash_a(0.90))
-		draw_line(a, tip_a, glow, 5.0)
-		draw_line(b, tip_b, glow, 4.5)
-	draw_line(a, tip_a, col, 2.0)
-	draw_line(b, tip_b, col, 1.7)
+		draw_line(a, tip_a, glow, 5.5)
+		draw_line(b, tip_b, glow, 5.0)
+	draw_line(a, tip_a, col, 2.6)
+	draw_line(b, tip_b, col, 2.2)
+	draw_line(base, tip_c, col, 1.8)

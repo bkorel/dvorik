@@ -481,19 +481,25 @@ func _draw_water(r: Rect2) -> void:
 	var m := minf(r.size.x, r.size.y)
 	var body := _water_body_rect(r)
 	var rad := minf(body.size.x, body.size.y) * 0.5
-	var rtl := edge_n != TileType.WATER and edge_w != TileType.WATER
-	var rtr := edge_n != TileType.WATER and edge_e != TileType.WATER
-	var rbl := edge_s != TileType.WATER and edge_w != TileType.WATER
-	var rbr := edge_s != TileType.WATER and edge_e != TileType.WATER
+	var open_n := edge_n != TileType.WATER
+	var open_e := edge_e != TileType.WATER
+	var open_s := edge_s != TileType.WATER
+	var open_w := edge_w != TileType.WATER
+	var rtl := open_n and open_w
+	var rtr := open_n and open_e
+	var rbl := open_s and open_w
+	var rbr := open_s and open_e
 	var c := body.get_center()
 
 	# Тень только по Y — на стыке двух водоёмов сдвиг по X рвёт пруд на
 	# отдельные пятна вместо одного.
 	_draw_round_rect(Rect2(body.position + Vector2(0.0, m * 0.065), body.size), TileType.SHADOW, rad)
 	TileArt.round_rect_sel(self, body, _lit(TileType.WATER_RIM), rad, rtl, rtr, rbl, rbr)
-	var inner := body.grow(-m * 0.055)
+	# Отступ внутренних слоёв только с открытых сторон — иначе на стыке
+	# нескольких чаш (пруд 2×2 и больше) обод проступает крестом.
+	var inner := TileArt.inset_open(body, m * 0.055, open_w, open_e, open_n, open_s)
 	TileArt.round_rect_sel(self, inner, _lit(TileType.WATER_DEEP), rad * 0.85, rtl, rtr, rbl, rbr)
-	var inner2 := body.grow(-m * 0.10)
+	var inner2 := TileArt.inset_open(body, m * 0.10, open_w, open_e, open_n, open_s)
 	TileArt.round_rect_sel(self, inner2, _lit(TileType.WATER_COL), rad * 0.75, rtl, rtr, rbl, rbr)
 	# Тусклый блик масла — один, у центра всей лужи.
 	draw_set_transform(c + Vector2(-body.size.x * 0.14, -body.size.y * 0.16), 0.0, Vector2(1.15, 0.45))
@@ -502,7 +508,12 @@ func _draw_water(r: Rect2) -> void:
 	_draw_reflections(c, m)
 	_draw_reeds(c, m)
 	if _flashing(DvorikSave.VIEW_REEDS):
-		TileArt.round_rect_sel(self, body.grow(m * 0.03), _sheen(_flash_a(0.5)), rad * 1.05, rtl, rtr, rbl, rbr)
+		var glow_x0 := body.position.x - (m * 0.03 if open_w else 0.0)
+		var glow_x1 := body.end.x + (m * 0.03 if open_e else 0.0)
+		var glow_y0 := body.position.y - (m * 0.03 if open_n else 0.0)
+		var glow_y1 := body.end.y + (m * 0.03 if open_s else 0.0)
+		var glow := Rect2(Vector2(glow_x0, glow_y0), Vector2(glow_x1 - glow_x0, glow_y1 - glow_y0))
+		TileArt.round_rect_sel(self, glow, _sheen(_flash_a(0.5)), rad * 1.05, rtl, rtr, rbl, rbr)
 
 
 func _draw_reflections(c: Vector2, m: float) -> void:

@@ -113,13 +113,19 @@ func _draw_shelf() -> void:
 
 
 func _draw_toy(rect: Rect2, tile: int, raised: bool) -> void:
-	var lift := Vector2(0.0, -rect.size.y * 0.18) if raised else Vector2.ZERO
-	var r := Rect2(rect.position + lift, rect.size)
+	# Выбранный камень заметно крупнее, поднят высоко над карнизом; тень
+	# остаётся у основания — виден явный отрыв, не смена цвета кнопки.
+	var scale_bump := 1.16 if raised else 1.0
+	var lift := rect.size.y * 0.42 if raised else 0.0
+	var base_size := rect.size * scale_bump
+	var r := Rect2(rect.get_center() - base_size * 0.5 - Vector2(0.0, lift), base_size)
 	var m := minf(r.size.x, r.size.y)
-	# Контактная тень на карнизе: у поднятой игрушки — ниже и мягче (виден отрыв).
-	var shadow_y := rect.position.y + rect.size.y * (0.94 if raised else 0.88)
-	draw_set_transform(Vector2(rect.get_center().x, shadow_y), 0.0, Vector2(1.0, 0.4))
-	draw_circle(Vector2.ZERO, m * (0.42 if raised else 0.36), Color(0.02, 0.02, 0.03, 0.42 if raised else 0.30))
+	# Тень всегда у основания слота: у поднятого камня — маленькая и далеко
+	# под ним (виден отрыв), у стоящего — широкая и прямо под ним.
+	var shadow_y := rect.end.y - rect.size.y * 0.05
+	var shadow_w := m * (0.24 if raised else 0.46)
+	draw_set_transform(Vector2(rect.get_center().x, shadow_y), 0.0, Vector2(1.0, 0.34))
+	draw_circle(Vector2.ZERO, shadow_w, Color(0.02, 0.02, 0.03, 0.55 if raised else 0.28))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	var inner := r.grow(-r.size.x * 0.10)
 	match tile:

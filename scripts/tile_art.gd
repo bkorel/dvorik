@@ -52,6 +52,17 @@ static func stone_grain(ci: CanvasItem, rect: Rect2, seed_x: int, seed_y: int, s
 	ci.draw_texture_rect_region(tex, rect, src, Color(1.0, 1.0, 1.0, strength))
 
 
+## Отступ ТОЛЬКО с «открытых» (не соединённых с соседом того же типа) сторон.
+## На соединённой стороне внутренний слой остаётся во всю ширину — иначе
+## между слитыми фишками проступает цвет обода/канта крестом.
+static func inset_open(rect: Rect2, inset: float, open_w: bool, open_e: bool, open_n: bool, open_s: bool) -> Rect2:
+	var x0 := rect.position.x + (inset if open_w else 0.0)
+	var x1 := rect.end.x - (inset if open_e else 0.0)
+	var y0 := rect.position.y + (inset if open_n else 0.0)
+	var y1 := rect.end.y - (inset if open_s else 0.0)
+	return Rect2(Vector2(x0, y0), Vector2(maxf(x1 - x0, 0.0), maxf(y1 - y0, 0.0)))
+
+
 ## Прямоугольник со скруглением ТОЛЬКО указанных углов. На стороне, где
 ## сосед того же типа, угол остаётся прямым — фишки сливаются в одно пятно
 ## без шва и без «талии» между ними.

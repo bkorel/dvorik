@@ -95,55 +95,96 @@ func _finish_press(pos: Vector2) -> void:
 func _draw() -> void:
 	if size.x <= 0.0:
 		return
-	# Та же оливковая древесина, что у стола.
-	draw_rect(Rect2(Vector2.ZERO, size), TileType.TABLE_EDGE)
-	draw_rect(Rect2(Vector2(6, 6), size - Vector2(12, 12)), TileType.TABLE)
+	draw_rect(Rect2(Vector2.ZERO, size), TileType.PALETTE_SHELF)
+	draw_rect(Rect2(Vector2(6, 6), size - Vector2(12, 12)), TileType.EARTH_TOP_ALT)
 	for i in _btn.size():
 		_draw_button(_btn[i], TYPES[i], TYPES[i] == selected)
 
 
 func _draw_button(rect: Rect2, tile: int, raised: bool) -> void:
-	var lift := Vector2(0.0, -rect.size.y * 0.10) if raised else Vector2.ZERO
-	var r := Rect2(rect.position + lift, rect.size)
+	# Объёмные фишки; выбранная приподнята.
+	var lift_y := -rect.size.y * 0.22 if raised else 0.0
+	var scale := 1.12 if raised else 1.0
+	var side := rect.size.x * scale
+	var r := Rect2(
+		rect.get_center().x - side * 0.5,
+		rect.get_center().y - side * 0.5 + lift_y,
+		side,
+		side
+	)
 	var m := minf(r.size.x, r.size.y)
-	# Выемка-кнопка; выбранная — приподнята.
-	draw_rect(Rect2(r.position + Vector2(m * 0.04, m * 0.06), r.size), TileType.SHADOW)
-	draw_rect(r, TileType.TABLE_RIDGE if raised else TileType.TABLE_RECESS)
+	# Тень у основания слота.
+	var shadow := Rect2(rect.position.x + m * 0.08, rect.end.y - m * 0.18, rect.size.x - m * 0.16, m * 0.14)
+	draw_rect(shadow, TileType.SHADOW)
+	draw_rect(r, TileType.PALETTE_WELL)
 	var well := r.grow(-m * 0.08)
-	draw_rect(well, TileType.TABLE if raised else TileType.TABLE_RECESS)
-	var inner := r.grow(-r.size.x * 0.16)
+	draw_rect(well, TileType.EARTH_TOP if raised else TileType.EARTH_LEFT)
+	var inner := r.grow(-r.size.x * 0.14)
 	match tile:
 		TileType.HOUSE:
-			var body := Rect2(inner.position.x, inner.position.y + inner.size.y * 0.22, inner.size.x, inner.size.y * 0.62)
-			draw_rect(Rect2(body.position + Vector2(2, 3), body.size), TileType.SHADOW)
-			draw_rect(body, TileType.WOOD_PALE)
-			var mid := inner.get_center()
-			draw_colored_polygon(
-				PackedVector2Array([
-					Vector2(inner.position.x + 2.0, inner.position.y + inner.size.y * 0.32),
-					Vector2(mid.x, inner.position.y + 2.0),
-					Vector2(inner.end.x - 2.0, inner.position.y + inner.size.y * 0.32),
-				]),
-				TileType.WOOD_ROOF
-			)
+			_chip_house(inner)
 		TileType.ROAD:
-			var pad := inner.size.y * 0.30
-			var plank := Rect2(inner.position.x, inner.position.y + pad, inner.size.x, inner.size.y - pad * 2.0)
-			draw_rect(Rect2(plank.position + Vector2(2, 3), plank.size), TileType.SHADOW)
-			draw_rect(plank, TileType.ROAD_COL)
-			var y1 := plank.position.y + plank.size.y * 0.35
-			draw_line(Vector2(plank.position.x, y1), Vector2(plank.end.x, y1), TileType.ROAD_GROOVE, 1.5)
+			_chip_road(inner)
 		TileType.TREE:
-			var c := inner.get_center()
-			var tm := minf(inner.size.x, inner.size.y)
-			draw_circle(c + Vector2(tm * 0.04, tm * 0.06), tm * 0.10, TileType.SHADOW)
-			draw_rect(Rect2(c.x - tm * 0.06, c.y, tm * 0.12, tm * 0.24), TileType.TREE_TRUNK)
-			draw_circle(c + Vector2(0.0, -tm * 0.08), tm * 0.24, TileType.TREE_CROWN)
-			draw_circle(c + Vector2(-tm * 0.08, -tm * 0.14), tm * 0.08, TileType.TREE_CROWN_HI)
+			_chip_tree(inner)
 		TileType.WATER:
-			var wc := inner.get_center()
-			var wm := minf(inner.size.x, inner.size.y)
-			draw_circle(wc + Vector2(wm * 0.04, wm * 0.05), wm * 0.28, TileType.SHADOW)
-			draw_circle(wc, wm * 0.28, TileType.WATER_RIM)
-			draw_circle(wc, wm * 0.20, TileType.WATER_COL)
-			draw_circle(wc + Vector2(-wm * 0.08, -wm * 0.08), wm * 0.06, TileType.WATER_GLOSS)
+			_chip_water(inner)
+
+
+func _chip_house(inner: Rect2) -> void:
+	var c := inner.get_center() + Vector2(0, inner.size.y * 0.08)
+	var hw := inner.size.x * 0.32
+	var hh := inner.size.y * 0.16
+	var wall := inner.size.y * 0.28
+	var base := c
+	var foot := c + Vector2(0, wall)
+	draw_colored_polygon(PackedVector2Array([
+		base + Vector2(-hw, 0), base + Vector2(0, hh), foot + Vector2(0, hh), foot + Vector2(-hw, 0)
+	]), TileType.WALL_SIDE)
+	draw_colored_polygon(PackedVector2Array([
+		base + Vector2(hw, 0), base + Vector2(0, hh), foot + Vector2(0, hh), foot + Vector2(hw, 0)
+	]), TileType.WALL_FRONT)
+	var peak := base + Vector2(0, -hh - wall * 0.55)
+	draw_colored_polygon(PackedVector2Array([peak, base + Vector2(0, -hh), base + Vector2(hw, 0)]), TileType.ROOF_LIT)
+	draw_colored_polygon(PackedVector2Array([peak, base + Vector2(0, -hh), base + Vector2(-hw, 0)]), TileType.ROOF_SHADE)
+	draw_rect(Rect2(c.x + hw * 0.15, peak.y + 2.0, 4.0, 9.0), TileType.CHIMNEY)
+	# Окна и дверь — чтобы фишка читалась как дом.
+	draw_rect(Rect2(c.x + 2.0, c.y + wall * 0.15, 6.0, 7.0), TileType.WINDOW)
+	draw_rect(Rect2(c.x - hw * 0.55, c.y + wall * 0.25, 5.0, 8.0), TileType.DOOR)
+
+
+func _chip_road(inner: Rect2) -> void:
+	var c := inner.get_center()
+	var a := c + Vector2(-inner.size.x * 0.28, -inner.size.y * 0.08)
+	var b := c + Vector2(inner.size.x * 0.28, inner.size.y * 0.18)
+	var n := Vector2(-(b.y - a.y), b.x - a.x).normalized() * inner.size.x * 0.12
+	draw_colored_polygon(PackedVector2Array([a + n, b + n, b - n, a - n]), TileType.ROAD_COL)
+	draw_line(a, b, TileType.ROAD_GROOVE, 1.4)
+	# Изгиб «в глубину».
+	var c2 := c + Vector2(inner.size.x * 0.05, -inner.size.y * 0.22)
+	var n2 := Vector2(inner.size.x * 0.10, inner.size.y * 0.04)
+	draw_colored_polygon(PackedVector2Array([c + n * 0.5, c2 + n2, c2 - n2, c - n * 0.5]), TileType.ROAD_LIT)
+
+
+func _chip_tree(inner: Rect2) -> void:
+	var c := inner.get_center()
+	var m := minf(inner.size.x, inner.size.y)
+	draw_rect(Rect2(c.x - m * 0.05, c.y - m * 0.02, m * 0.10, m * 0.28), TileType.TREE_TRUNK)
+	draw_set_transform(c + Vector2(0, -m * 0.18), 0.0, Vector2(1.15, 0.85))
+	draw_circle(Vector2.ZERO, m * 0.22, TileType.TREE_CROWN_MID)
+	draw_set_transform(c + Vector2(-m * 0.08, -m * 0.24), 0.0, Vector2(1.0, 0.8))
+	draw_circle(Vector2.ZERO, m * 0.16, TileType.TREE_CROWN)
+	draw_set_transform(c + Vector2(m * 0.06, -m * 0.28), 0.0, Vector2.ONE)
+	draw_circle(Vector2.ZERO, m * 0.08, TileType.TREE_CROWN_HI)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _chip_water(inner: Rect2) -> void:
+	var c := inner.get_center()
+	var hw := inner.size.x * 0.36
+	var hh := inner.size.y * 0.18
+	draw_colored_polygon(Iso.diamond(c + Vector2(2, 2), hw, hh), TileType.SHADOW)
+	draw_colored_polygon(Iso.diamond(c, hw, hh), TileType.WATER_RIM)
+	draw_colored_polygon(Iso.diamond(c, hw * 0.78, hh * 0.78), TileType.WATER_DEEP)
+	draw_colored_polygon(Iso.diamond(c + Vector2(0, 2), hw * 0.55, hh * 0.55), TileType.WATER_COL)
+	draw_circle(c + Vector2(-hw * 0.2, -hh * 0.2), hw * 0.12, TileType.WATER_GLOSS)

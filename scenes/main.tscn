@@ -1,0 +1,40 @@
+[gd_scene load_steps=4 format=3 uid="uid://c8dvorikmain001"]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/board.gd" id="2_board"]
+[ext_resource type="Script" path="res://scripts/palette.gd" id="3_palette"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_main")
+
+[node name="Bg" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.5, 0.34, 0.18, 1)
+
+[node name="Board" type="Control" parent="."]
+layout_mode = 1
+anchor_left = 0.037
+anchor_top = 0.05
+anchor_right = 0.963
+anchor_bottom = 0.72
+script = ExtResource("2_board")
+
+[node name="Palette" type="Control" parent="."]
+layout_mode = 1
+anchor_left = 0.07
+anchor_top = 0.76
+anchor_right = 0.93
+anchor_bottom = 0.95
+script = ExtResource("3_palette")

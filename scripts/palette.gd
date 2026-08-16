@@ -95,55 +95,78 @@ func _finish_press(pos: Vector2) -> void:
 func _draw() -> void:
 	if size.x <= 0.0:
 		return
-	# Та же оливковая древесина, что у стола.
+	# Каменный карниз / полка под игрушками — не UI-кнопки.
 	draw_rect(Rect2(Vector2.ZERO, size), TileType.TABLE_EDGE)
-	draw_rect(Rect2(Vector2(6, 6), size - Vector2(12, 12)), TileType.TABLE)
+	var shelf := Rect2(Vector2(5, 5), size - Vector2(10, 10))
+	draw_rect(shelf, TileType.TABLE)
+	# Верхняя грань карниза.
+	var lip_h := size.y * 0.14
+	draw_rect(Rect2(shelf.position.x, shelf.position.y, shelf.size.x, lip_h), TileType.STONE_MID)
+	draw_line(
+		Vector2(shelf.position.x, shelf.position.y + lip_h),
+		Vector2(shelf.end.x, shelf.position.y + lip_h),
+		TileType.STONE_DARK,
+		2.0
+	)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for i in 12:
+		var p := Vector2(
+			shelf.position.x + rng.randf() * shelf.size.x,
+			shelf.position.y + lip_h + rng.randf() * (shelf.size.y - lip_h)
+		)
+		draw_circle(p, rng.randf_range(0.6, 1.4), Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.35))
 	for i in _btn.size():
-		_draw_button(_btn[i], TYPES[i], TYPES[i] == selected)
+		_draw_toy(_btn[i], TYPES[i], TYPES[i] == selected)
 
 
-func _draw_button(rect: Rect2, tile: int, raised: bool) -> void:
-	var lift := Vector2(0.0, -rect.size.y * 0.10) if raised else Vector2.ZERO
+func _draw_toy(rect: Rect2, tile: int, raised: bool) -> void:
+	var lift := Vector2(0.0, -rect.size.y * 0.12) if raised else Vector2.ZERO
 	var r := Rect2(rect.position + lift, rect.size)
 	var m := minf(r.size.x, r.size.y)
-	# Выемка-кнопка; выбранная — приподнята.
-	draw_rect(Rect2(r.position + Vector2(m * 0.04, m * 0.06), r.size), TileType.SHADOW)
-	draw_rect(r, TileType.TABLE_RIDGE if raised else TileType.TABLE_RECESS)
-	var well := r.grow(-m * 0.08)
-	draw_rect(well, TileType.TABLE if raised else TileType.TABLE_RECESS)
-	var inner := r.grow(-r.size.x * 0.16)
+	# Тень на полке; выбранная игрушка приподнята.
+	draw_rect(Rect2(r.position + Vector2(m * 0.05, m * 0.08), r.size * Vector2(0.9, 0.55)), TileType.SHADOW)
+	var inner := r.grow(-r.size.x * 0.12)
 	match tile:
 		TileType.HOUSE:
-			var body := Rect2(inner.position.x, inner.position.y + inner.size.y * 0.22, inner.size.x, inner.size.y * 0.62)
+			var body := Rect2(inner.position.x, inner.position.y + inner.size.y * 0.28, inner.size.x, inner.size.y * 0.55)
 			draw_rect(Rect2(body.position + Vector2(2, 3), body.size), TileType.SHADOW)
-			draw_rect(body, TileType.WOOD_PALE)
-			var mid := inner.get_center()
-			draw_colored_polygon(
-				PackedVector2Array([
-					Vector2(inner.position.x + 2.0, inner.position.y + inner.size.y * 0.32),
-					Vector2(mid.x, inner.position.y + 2.0),
-					Vector2(inner.end.x - 2.0, inner.position.y + inner.size.y * 0.32),
-				]),
-				TileType.WOOD_ROOF
-			)
+			draw_rect(body, TileType.STONE_MID)
+			draw_rect(Rect2(body.position.x, body.end.y - body.size.y * 0.28, body.size.x, body.size.y * 0.28), TileType.STONE_FACE)
+			var roof := PackedVector2Array([
+				Vector2(body.position.x, body.position.y + m * 0.06),
+				Vector2(body.position.x + m * 0.05, body.position.y - m * 0.10),
+				Vector2(body.end.x + m * 0.05, body.position.y - m * 0.10),
+				Vector2(body.end.x, body.position.y + m * 0.06),
+			])
+			draw_colored_polygon(roof, TileType.ROOF_SLAB)
+			draw_line(roof[0], roof[3], TileType.ROOF_EDGE, 1.6)
 		TileType.ROAD:
-			var pad := inner.size.y * 0.30
+			var pad := inner.size.y * 0.28
 			var plank := Rect2(inner.position.x, inner.position.y + pad, inner.size.x, inner.size.y - pad * 2.0)
 			draw_rect(Rect2(plank.position + Vector2(2, 3), plank.size), TileType.SHADOW)
 			draw_rect(plank, TileType.ROAD_COL)
-			var y1 := plank.position.y + plank.size.y * 0.35
-			draw_line(Vector2(plank.position.x, y1), Vector2(plank.end.x, y1), TileType.ROAD_GROOVE, 1.5)
+			var y1 := plank.get_center().y
+			draw_line(Vector2(plank.position.x, y1), Vector2(plank.end.x, y1), TileType.ROAD_GROOVE, 1.8)
+			draw_line(
+				Vector2(plank.position.x + plank.size.x * 0.33, plank.position.y + 2.0),
+				Vector2(plank.position.x + plank.size.x * 0.33, plank.end.y - 2.0),
+				TileType.ROAD_SEAM,
+				1.2
+			)
 		TileType.TREE:
 			var c := inner.get_center()
 			var tm := minf(inner.size.x, inner.size.y)
 			draw_circle(c + Vector2(tm * 0.04, tm * 0.06), tm * 0.10, TileType.SHADOW)
-			draw_rect(Rect2(c.x - tm * 0.06, c.y, tm * 0.12, tm * 0.24), TileType.TREE_TRUNK)
-			draw_circle(c + Vector2(0.0, -tm * 0.08), tm * 0.24, TileType.TREE_CROWN)
-			draw_circle(c + Vector2(-tm * 0.08, -tm * 0.14), tm * 0.08, TileType.TREE_CROWN_HI)
+			draw_rect(Rect2(c.x - tm * 0.05, c.y, tm * 0.10, tm * 0.24), TileType.TREE_TRUNK)
+			draw_circle(c + Vector2(0.0, -tm * 0.08), tm * 0.24, TileType.TREE_CROWN_LO)
+			draw_circle(c + Vector2(-tm * 0.07, -tm * 0.10), tm * 0.14, TileType.TREE_CROWN)
+			draw_circle(c + Vector2(tm * 0.06, -tm * 0.12), tm * 0.12, TileType.TREE_CROWN_HI)
 		TileType.WATER:
 			var wc := inner.get_center()
 			var wm := minf(inner.size.x, inner.size.y)
 			draw_circle(wc + Vector2(wm * 0.04, wm * 0.05), wm * 0.28, TileType.SHADOW)
 			draw_circle(wc, wm * 0.28, TileType.WATER_RIM)
-			draw_circle(wc, wm * 0.20, TileType.WATER_COL)
-			draw_circle(wc + Vector2(-wm * 0.08, -wm * 0.08), wm * 0.06, TileType.WATER_GLOSS)
+			draw_circle(wc, wm * 0.20, TileType.WATER_DEEP)
+			draw_circle(wc, wm * 0.17, TileType.WATER_COL)
+			draw_circle(wc + Vector2(-wm * 0.07, -wm * 0.08), wm * 0.05, TileType.WATER_GLOSS)

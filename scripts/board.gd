@@ -52,27 +52,33 @@ func _relayout() -> void:
 
 
 func _draw() -> void:
-	# Рама стола вокруг сетки — тёплое оливковое дерево.
+	# Каменная плита вокруг сетки — холодный тёмный камень.
 	if size.x <= 0.0 or size.y <= 0.0:
 		return
 	var side := minf(size.x, size.y)
 	var ox := (size.x - side) * 0.5
 	var oy := (size.y - side) * 0.5
-	var frame := Rect2(Vector2(ox, oy), Vector2(side, side)).grow(side * 0.018)
+	var frame := Rect2(Vector2(ox, oy), Vector2(side, side)).grow(side * 0.022)
 	draw_rect(frame, TileType.TABLE_EDGE)
-	draw_rect(frame.grow(-side * 0.008), TileType.TABLE)
-	# Горизонтальное волокно стола.
+	draw_rect(frame.grow(-side * 0.010), TileType.TABLE)
+	# Холодная зернистость плиты.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 11
-	for i in 14:
-		var y := frame.position.y + rng.randf() * frame.size.y
-		var a := Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.35)
-		draw_line(
-			Vector2(frame.position.x + 2.0, y),
-			Vector2(frame.end.x - 2.0, y + rng.randf_range(-1.5, 1.5)),
-			a,
-			1.2
+	for i in 28:
+		var p := Vector2(
+			frame.position.x + rng.randf() * frame.size.x,
+			frame.position.y + rng.randf() * frame.size.y
 		)
+		var a := Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.38)
+		draw_circle(p, rng.randf_range(0.7, 1.8), a)
+	# Слегка скошенный верхний кант — плита читается как крыша двора.
+	var bevel := side * 0.012
+	var hi := Color(0.42, 0.43, 0.46, 0.22)
+	var sh := Color(0.04, 0.04, 0.05, 0.40)
+	draw_line(frame.position, Vector2(frame.end.x, frame.position.y), hi, bevel)
+	draw_line(frame.position, Vector2(frame.position.x, frame.end.y), hi, bevel * 0.7)
+	draw_line(Vector2(frame.position.x, frame.end.y), frame.end, sh, bevel)
+	draw_line(Vector2(frame.end.x, frame.position.y), frame.end, sh, bevel * 0.7)
 
 
 func bind_palette(palette: Palette) -> void:

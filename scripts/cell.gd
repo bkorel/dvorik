@@ -12,14 +12,16 @@ var grid_x: int = 0
 var grid_y: int = 0
 var tile: int = TileType.EMPTY
 
-# Слияние домов по ортогональному ребру. Диагональ не сосед.
-var merge_n: bool = false
-var merge_e: bool = false
-var merge_s: bool = false
-var merge_w: bool = false
+# Тип соседа на ортогональном ребре. EMPTY — пусто / край доски. Диагональ не сосед.
+var edge_n: int = TileType.EMPTY
+var edge_e: int = TileType.EMPTY
+var edge_s: int = TileType.EMPTY
+var edge_w: int = TileType.EMPTY
 
-# Вспышка улочки: 1 → 0 один раз, ввод живой.
+# Лаковая вспышка вида: 1 → 0 один раз, ввод живой.
 var flash: float = 0.0
+# Какие id открылись в этой вспышке (для усиления path/reeds).
+var flash_views: Array = []
 
 var _pressing: bool = false
 var _press_pos: Vector2 = Vector2.ZERO
@@ -35,7 +37,12 @@ func _ready() -> void:
 
 
 func has_street_edge() -> bool:
-	return merge_n or merge_e or merge_s or merge_w
+	return tile == TileType.HOUSE and (
+		edge_n == TileType.HOUSE
+		or edge_e == TileType.HOUSE
+		or edge_s == TileType.HOUSE
+		or edge_w == TileType.HOUSE
+	)
 
 
 func poke() -> void:
@@ -46,8 +53,12 @@ func poke() -> void:
 	tw.tween_property(self, "scale", Vector2.ONE, 0.08)
 
 
-func start_flash() -> void:
+func start_flash(views: Array = []) -> void:
 	flash = 1.0
+	for v in views:
+		var s := str(v)
+		if s not in flash_views:
+			flash_views.append(s)
 	set_process(true)
 	queue_redraw()
 
@@ -55,11 +66,16 @@ func start_flash() -> void:
 func _process(delta: float) -> void:
 	if flash <= 0.0:
 		flash = 0.0
+		flash_views.clear()
 		set_process(false)
 		queue_redraw()
 		return
 	flash = maxf(0.0, flash - delta / 0.55)
 	queue_redraw()
+
+
+func _flashing(view_id: String) -> bool:
+	return flash > 0.0 and view_id in flash_views
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -132,6 +148,18 @@ func _lit(base: Color) -> Color:
 	return base.lerp(TileType.FLASH_LIT, clampf(flash, 0.0, 1.0) * 0.72)
 
 
+func _flash_a(mult: float = 0.65) -> float:
+	return clampf(flash, 0.0, 1.0) * mult
+
+
+func _sheen(a: float) -> Color:
+	return Color(TileType.FLASH_LIT.r, TileType.FLASH_LIT.g, TileType.FLASH_LIT.b, a)
+
+
+func _has_neighbor(t: int) -> bool:
+	return edge_n == t or edge_e == t or edge_s == t or edge_w == t
+
+
 func _draw_grass(r: Rect2) -> void:
 	# Пустые — трава: сама доска, зеленоватая, с намёком на волокно. Не войд.
 	draw_rect(r, TileType.GRASS)
@@ -157,6 +185,8 @@ func _draw_house(r: Rect2) -> void:
 	var face := Rect2(body.position + Vector2(3, 3), body.size - Vector2(6, 8))
 	draw_rect(face, _lit(TileType.WOOD_LIGHT))
 	_draw_ridges(body)
+	_draw_porches(body)
+	_draw_yards(body)
 
 
 func _draw_ridges(body: Rect2) -> void:
@@ -177,23 +207,68 @@ func _draw_ridges(body: Rect2) -> void:
 		)
 		draw_line(Vector2(mid.x, peak.y), Vector2(mid.x, body.end.y - inset), col, w)
 		return
-	if merge_n:
+	if edge_n == TileType.HOUSE:
 		draw_line(Vector2(mid.x, 0.0), Vector2(mid.x, mid.y), col, w)
-	if merge_s:
+	if edge_s == TileType.HOUSE:
 		draw_line(Vector2(mid.x, mid.y), Vector2(mid.x, size.y), col, w)
-	if merge_w:
+	if edge_w == TileType.HOUSE:
 		draw_line(Vector2(0.0, mid.y), Vector2(mid.x, mid.y), col, w)
-	if merge_e:
+	if edge_e == TileType.HOUSE:
 		draw_line(Vector2(mid.x, mid.y), Vector2(size.x, mid.y), col, w)
 	# Шапка общего конька на затронутом ребре.
-	if merge_n:
+	if edge_n == TileType.HOUSE:
 		draw_circle(Vector2(mid.x, 0.0), w * 0.65, col)
-	if merge_s:
+	if edge_s == TileType.HOUSE:
 		draw_circle(Vector2(mid.x, size.y), w * 0.65, col)
-	if merge_w:
+	if edge_w == TileType.HOUSE:
 		draw_circle(Vector2(0.0, mid.y), w * 0.65, col)
-	if merge_e:
+	if edge_e == TileType.HOUSE:
 		draw_circle(Vector2(size.x, mid.y), w * 0.65, col)
+
+
+func _draw_porches(body: Rect2) -> void:
+	# house+road: маленький порожек у дома к рейке.
+	var m := minf(size.x, size.y)
+	var thick := m * 0.10
+	var span := m * 0.34
+	var col := _lit(TileType.PORCH)
+	var edge := _lit(TileType.PORCH_EDGE)
+	if edge_n == TileType.ROAD:
+		var pr := Rect2(body.get_center().x - span * 0.5, 1.0, span, thick)
+		draw_rect(pr, col)
+		draw_rect(pr, edge, false, 1.4)
+	if edge_s == TileType.ROAD:
+		var pr2 := Rect2(body.get_center().x - span * 0.5, size.y - thick - 1.0, span, thick)
+		draw_rect(pr2, col)
+		draw_rect(pr2, edge, false, 1.4)
+	if edge_w == TileType.ROAD:
+		var pr3 := Rect2(1.0, body.get_center().y - span * 0.5, thick, span)
+		draw_rect(pr3, col)
+		draw_rect(pr3, edge, false, 1.4)
+	if edge_e == TileType.ROAD:
+		var pr4 := Rect2(size.x - thick - 1.0, body.get_center().y - span * 0.5, thick, span)
+		draw_rect(pr4, col)
+		draw_rect(pr4, edge, false, 1.4)
+
+
+func _draw_yards(body: Rect2) -> void:
+	# house+tree: куст-колышек у стены дома. Пруд/роща на воде/деревьях не мешают.
+	var m := minf(size.x, size.y)
+	var peg_r := m * 0.045
+	var bush_r := m * 0.09
+	if edge_n == TileType.TREE:
+		_yard_at(Vector2(body.get_center().x, body.position.y + m * 0.02), peg_r, bush_r)
+	if edge_s == TileType.TREE:
+		_yard_at(Vector2(body.get_center().x, body.end.y - m * 0.02), peg_r, bush_r)
+	if edge_w == TileType.TREE:
+		_yard_at(Vector2(body.position.x + m * 0.02, body.get_center().y), peg_r, bush_r)
+	if edge_e == TileType.TREE:
+		_yard_at(Vector2(body.end.x - m * 0.02, body.get_center().y), peg_r, bush_r)
+
+
+func _yard_at(p: Vector2, peg_r: float, bush_r: float) -> void:
+	draw_rect(Rect2(p.x - peg_r * 0.55, p.y - peg_r * 0.2, peg_r * 1.1, peg_r * 1.6), _lit(TileType.YARD_PEG))
+	draw_circle(p + Vector2(0.0, -bush_r * 0.35), bush_r, _lit(TileType.YARD_BUSH))
 
 
 func _draw_road(r: Rect2) -> void:
@@ -201,34 +276,194 @@ func _draw_road(r: Rect2) -> void:
 	var m := minf(r.size.x, r.size.y)
 	var pad := m * 0.20
 	var body := Rect2(0.0, pad, r.size.x, r.size.y - pad * 2.0)
+	var shaded := _has_neighbor(TileType.TREE)
+	var plank := TileType.PATH_SHADE if shaded else TileType.ROAD_COL
+	var groove := TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE
 	draw_rect(Rect2(body.position + Vector2(0, 3), body.size), TileType.SHADOW)
-	draw_rect(body, TileType.ROAD_COL)
+	draw_rect(body, _lit(plank))
 	var y1 := body.position.y + body.size.y * 0.32
 	var y2 := body.position.y + body.size.y * 0.68
-	draw_line(Vector2(0.0, y1), Vector2(r.size.x, y1), TileType.ROAD_GROOVE, 1.6)
-	draw_line(Vector2(0.0, y2), Vector2(r.size.x, y2), TileType.ROAD_GROOVE, 1.6)
+	draw_line(Vector2(0.0, y1), Vector2(r.size.x, y1), _lit(groove), 1.6)
+	draw_line(Vector2(0.0, y2), Vector2(r.size.x, y2), _lit(groove), 1.6)
+	_draw_puddles(body)
+	# path: на тёмной рейке обычный _lit слабо виден — явный лаковый слой только при flash path.
+	if _flashing(DvorikSave.VIEW_PATH) and shaded:
+		draw_rect(body, _sheen(_flash_a(0.72)))
+		draw_line(Vector2(0.0, y1), Vector2(r.size.x, y1), _sheen(_flash_a(0.85)), 2.4)
+		draw_line(Vector2(0.0, y2), Vector2(r.size.x, y2), _sheen(_flash_a(0.85)), 2.4)
+
+
+func _draw_puddles(body: Rect2) -> void:
+	# road+water: одно синее пятно на рейке (не мост).
+	var m := minf(size.x, size.y)
+	var rad := m * 0.11
+	if edge_n == TileType.WATER:
+		_puddle_at(Vector2(body.get_center().x, body.position.y + rad * 0.9), rad)
+	if edge_s == TileType.WATER:
+		_puddle_at(Vector2(body.get_center().x, body.end.y - rad * 0.9), rad)
+	if edge_w == TileType.WATER:
+		_puddle_at(Vector2(body.position.x + rad * 1.1, body.get_center().y), rad)
+	if edge_e == TileType.WATER:
+		_puddle_at(Vector2(body.end.x - rad * 1.1, body.get_center().y), rad)
+
+
+func _puddle_at(c: Vector2, rad: float) -> void:
+	draw_set_transform(c, 0.0, Vector2(1.35, 0.62))
+	draw_circle(Vector2.ZERO, rad, _lit(TileType.WATER_DEEP))
+	draw_circle(Vector2.ZERO, rad * 0.72, _lit(TileType.WATER_PUDDLE))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_tree(r: Rect2) -> void:
 	# Дерево — колышек с кроной; выше дороги, ниже конька.
+	# tree+tree: кроны почти сошлись — сдвиг/растяг к соседу; ряд длиннее.
 	var m := minf(r.size.x, r.size.y)
 	var c := r.get_center()
+	var pull := Vector2.ZERO
+	var stretch := 1.0
+	if edge_n == TileType.TREE:
+		pull.y -= m * 0.16
+		stretch = maxf(stretch, 1.22)
+	if edge_s == TileType.TREE:
+		pull.y += m * 0.16
+		stretch = maxf(stretch, 1.22)
+	if edge_w == TileType.TREE:
+		pull.x -= m * 0.16
+		stretch = maxf(stretch, 1.22)
+	if edge_e == TileType.TREE:
+		pull.x += m * 0.16
+		stretch = maxf(stretch, 1.22)
+	var crown_c := c + pull + Vector2(0.0, -m * 0.10)
 	draw_circle(c + Vector2(2, 6), m * 0.10, TileType.SHADOW)
 	var trunk := Rect2(c.x - m * 0.07, c.y + m * 0.02, m * 0.14, m * 0.24)
-	draw_rect(trunk, TileType.TREE_TRUNK)
-	draw_circle(c + Vector2(0.0, -m * 0.10), m * 0.24, TileType.TREE_CROWN)
-	draw_circle(c + Vector2(-m * 0.08, -m * 0.16), m * 0.09, TileType.TREE_CROWN_HI)
+	draw_rect(trunk, _lit(TileType.TREE_TRUNK))
+	draw_set_transform(crown_c, 0.0, Vector2(stretch, stretch * 0.92))
+	draw_circle(Vector2.ZERO, m * 0.24, _lit(TileType.TREE_CROWN))
+	draw_set_transform(crown_c + Vector2(-m * 0.08, -m * 0.06), 0.0, Vector2.ONE)
+	draw_circle(Vector2.ZERO, m * 0.09, _lit(TileType.TREE_CROWN_HI))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Мостик кроны к соседу — «почти сошлись».
+	var bridge_r := m * 0.14
+	if edge_n == TileType.TREE:
+		draw_circle(Vector2(c.x, 0.0), bridge_r, _lit(TileType.TREE_CROWN))
+	if edge_s == TileType.TREE:
+		draw_circle(Vector2(c.x, size.y), bridge_r, _lit(TileType.TREE_CROWN))
+	if edge_w == TileType.TREE:
+		draw_circle(Vector2(0.0, c.y - m * 0.08), bridge_r, _lit(TileType.TREE_CROWN))
+	if edge_e == TileType.TREE:
+		draw_circle(Vector2(size.x, c.y - m * 0.08), bridge_r, _lit(TileType.TREE_CROWN))
+	# path / reeds: вторая фишка пары — явный лак на кроне (покойный вид тот же).
+	if _flashing(DvorikSave.VIEW_PATH) or _flashing(DvorikSave.VIEW_REEDS):
+		draw_set_transform(crown_c, 0.0, Vector2(stretch, stretch * 0.92))
+		draw_circle(Vector2.ZERO, m * 0.26, _sheen(_flash_a(0.70)))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_rect(Rect2(trunk.position - Vector2(1, 1), trunk.size + Vector2(2, 2)), _sheen(_flash_a(0.55)))
 
 
 func _draw_water(r: Rect2) -> void:
-	# Вода — синяя лужа-фишка, глянцевая, с бликом, самая низкая.
+	# Вода — синяя лужа-фишка. water+water = одно пятно, вытянутое к соседу.
 	var m := minf(r.size.x, r.size.y)
 	var c := r.get_center() + Vector2(0.0, m * 0.04)
-	draw_set_transform(c + Vector2(2, 3), 0.0, Vector2(1.28, 0.70))
+	var pull := Vector2.ZERO
+	var sx := 1.28
+	var sy := 0.70
+	if edge_n == TileType.WATER:
+		pull.y -= m * 0.18
+		sy = maxf(sy, 1.15)
+	if edge_s == TileType.WATER:
+		pull.y += m * 0.18
+		sy = maxf(sy, 1.15)
+	if edge_w == TileType.WATER:
+		pull.x -= m * 0.18
+		sx = maxf(sx, 1.55)
+	if edge_e == TileType.WATER:
+		pull.x += m * 0.18
+		sx = maxf(sx, 1.55)
+	var pc := c + pull
+	draw_set_transform(pc + Vector2(2, 3), 0.0, Vector2(sx, sy))
 	draw_circle(Vector2.ZERO, m * 0.28, TileType.SHADOW)
-	draw_set_transform(c, 0.0, Vector2(1.28, 0.70))
-	draw_circle(Vector2.ZERO, m * 0.28, TileType.WATER_DEEP)
-	draw_circle(Vector2.ZERO, m * 0.23, TileType.WATER_COL)
-	draw_set_transform(c + Vector2(-m * 0.10, -m * 0.07), 0.0, Vector2(1.05, 0.50))
-	draw_circle(Vector2.ZERO, m * 0.07, TileType.WATER_GLOSS)
+	draw_set_transform(pc, 0.0, Vector2(sx, sy))
+	draw_circle(Vector2.ZERO, m * 0.28, _lit(TileType.WATER_DEEP))
+	draw_circle(Vector2.ZERO, m * 0.23, _lit(TileType.WATER_COL))
+	draw_set_transform(pc + Vector2(-m * 0.10, -m * 0.07), 0.0, Vector2(1.05, 0.50))
+	draw_circle(Vector2.ZERO, m * 0.07, _lit(TileType.WATER_GLOSS))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	# Смыкание пятна на общем ребре.
+	var join_r := m * 0.20
+	if edge_n == TileType.WATER:
+		draw_set_transform(Vector2(c.x, 0.0), 0.0, Vector2(1.2, 0.7))
+		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
+	if edge_s == TileType.WATER:
+		draw_set_transform(Vector2(c.x, size.y), 0.0, Vector2(1.2, 0.7))
+		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
+	if edge_w == TileType.WATER:
+		draw_set_transform(Vector2(0.0, c.y), 0.0, Vector2(0.7, 1.1))
+		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
+	if edge_e == TileType.WATER:
+		draw_set_transform(Vector2(size.x, c.y), 0.0, Vector2(0.7, 1.1))
+		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_draw_reflections(c, m)
+	_draw_reeds(c, m)
+	# reeds: лужа тоже блестит вместе с прутиками — обе фишки пары.
+	if _flashing(DvorikSave.VIEW_REEDS):
+		draw_set_transform(pc, 0.0, Vector2(sx, sy))
+		draw_circle(Vector2.ZERO, m * 0.30, _sheen(_flash_a(0.55)))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_reflections(c: Vector2, m: float) -> void:
+	# house+water: тёмный силуэт крыши на воде, не зеркало.
+	var col := _lit(TileType.REFLECTION)
+	if edge_n == TileType.HOUSE:
+		_roof_silhouette(Vector2(c.x, m * 0.18), m, col)
+	if edge_s == TileType.HOUSE:
+		_roof_silhouette(Vector2(c.x, size.y - m * 0.18), m, col)
+	if edge_w == TileType.HOUSE:
+		_roof_silhouette(Vector2(m * 0.22, c.y), m, col)
+	if edge_e == TileType.HOUSE:
+		_roof_silhouette(Vector2(size.x - m * 0.22, c.y), m, col)
+
+
+func _roof_silhouette(p: Vector2, m: float, col: Color) -> void:
+	var hw := m * 0.16
+	var hh := m * 0.11
+	draw_colored_polygon(
+		PackedVector2Array([
+			Vector2(p.x - hw, p.y + hh * 0.35),
+			Vector2(p.x, p.y - hh),
+			Vector2(p.x + hw, p.y + hh * 0.35),
+		]),
+		col
+	)
+	draw_rect(Rect2(p.x - hw * 0.55, p.y + hh * 0.25, hw * 1.1, hh * 0.55), col)
+
+
+func _draw_reeds(c: Vector2, m: float) -> void:
+	# water+tree: два прутика у края лужи.
+	if edge_n == TileType.TREE:
+		_reeds_at(Vector2(c.x, m * 0.08), Vector2(0, -1), m)
+	if edge_s == TileType.TREE:
+		_reeds_at(Vector2(c.x, size.y - m * 0.08), Vector2(0, 1), m)
+	if edge_w == TileType.TREE:
+		_reeds_at(Vector2(m * 0.08, c.y), Vector2(-1, 0), m)
+	if edge_e == TileType.TREE:
+		_reeds_at(Vector2(size.x - m * 0.08, c.y), Vector2(1, 0), m)
+
+
+func _reeds_at(base: Vector2, outward: Vector2, m: float) -> void:
+	var col := _lit(TileType.REED)
+	var perp := Vector2(-outward.y, outward.x)
+	var len1 := m * 0.16
+	var len2 := m * 0.13
+	var a := base + perp * m * 0.04
+	var b := base - perp * m * 0.05
+	var tip_a := a + outward * len1 + perp * m * 0.02
+	var tip_b := b + outward * len2 - perp * m * 0.015
+	# Тонкие прутики: при первой вспышке reeds — яркая подложка, иначе только обычные линии.
+	if _flashing(DvorikSave.VIEW_REEDS):
+		var glow := _sheen(_flash_a(0.90))
+		draw_line(a, tip_a, glow, 5.0)
+		draw_line(b, tip_b, glow, 4.5)
+	draw_line(a, tip_a, col, 2.0)
+	draw_line(b, tip_b, col, 1.7)

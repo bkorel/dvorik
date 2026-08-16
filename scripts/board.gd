@@ -66,7 +66,7 @@ func try_place(x: int, y: int, tile: int) -> void:
 	cell.tile = tile
 	cell.queue_redraw()
 	_refresh_edges(Vector2i(x, y))
-	_maybe_discover_street()
+	_maybe_discover_views()
 	_save()
 
 
@@ -80,41 +80,48 @@ func _refresh_edges(gp: Vector2i) -> void:
 
 func _update_joins(gp: Vector2i) -> void:
 	var cell := _cell_at(gp)
-	# неделя 1: только дом+дом. клетка не выбирает «кем я стала».
-	var n := false
-	var e := false
-	var s := false
-	var w := false
-	if cell.tile == TileType.HOUSE:
-		n = _is_house(gp + Vector2i(0, -1))
-		e = _is_house(gp + Vector2i(1, 0))
-		s = _is_house(gp + Vector2i(0, 1))
-		w = _is_house(gp + Vector2i(-1, 0))
-	cell.merge_n = n
-	cell.merge_e = e
-	cell.merge_s = s
-	cell.merge_w = w
+	# На каждом ортогональном ребре — тип соседа. Клетка не меняет свой тип.
+	cell.edge_n = _neighbor_tile(gp + Vector2i(0, -1))
+	cell.edge_e = _neighbor_tile(gp + Vector2i(1, 0))
+	cell.edge_s = _neighbor_tile(gp + Vector2i(0, 1))
+	cell.edge_w = _neighbor_tile(gp + Vector2i(-1, 0))
 	cell.queue_redraw()
 
 
-func _is_house(gp: Vector2i) -> bool:
-	return _in_bounds(gp) and _cell_at(gp).tile == TileType.HOUSE
+func _neighbor_tile(gp: Vector2i) -> int:
+	if not _in_bounds(gp):
+		return TileType.EMPTY
+	return _cell_at(gp).tile
 
 
-func _maybe_discover_street() -> void:
-	if DvorikSave.VIEW_STREET in _found:
-		return
-	var any_street := false
+func _maybe_discover_views() -> void:
+	# Любой новый id вида — одна лаковая вспышка на затронутых фишках (обе стороны пары).
+	var fresh: Array = []
+	var flash_map: Dictionary = {}
 	for cell in _cells:
-		if cell.has_street_edge():
-			any_street = true
-			break
-	if not any_street:
+		if cell.tile == TileType.EMPTY:
+			continue
+		for nt in [cell.edge_n, cell.edge_e, cell.edge_s, cell.edge_w]:
+			var vid := DvorikSave.view_for(cell.tile, nt)
+			if vid.is_empty():
+				continue
+			if vid in _found:
+				continue
+			if vid not in fresh:
+				fresh.append(vid)
+			var id: int = cell.get_instance_id()
+			if not flash_map.has(id):
+				flash_map[id] = {"cell": cell, "views": []}
+			var views: Array = flash_map[id]["views"]
+			if vid not in views:
+				views.append(vid)
+	if fresh.is_empty():
 		return
-	_found.append(DvorikSave.VIEW_STREET)
-	for cell in _cells:
-		if cell.has_street_edge():
-			cell.start_flash()
+	for vid in fresh:
+		_found.append(vid)
+	for entry in flash_map.values():
+		var c: Cell = entry["cell"]
+		c.start_flash(entry["views"])
 
 
 func _load() -> void:
@@ -124,6 +131,7 @@ func _load() -> void:
 	for i in _cells.size():
 		_cells[i].tile = int(grid[i])
 		_cells[i].flash = 0.0
+		_cells[i].flash_views.clear()
 		_cells[i].set_process(false)
 	for y in GRID:
 		for x in GRID:

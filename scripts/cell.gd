@@ -20,6 +20,8 @@ var edge_w: int = TileType.EMPTY
 
 # Лаковая вспышка вида: 1 → 0 один раз, ввод живой.
 var flash: float = 0.0
+# Какие id открылись в этой вспышке (для усиления path/reeds).
+var flash_views: Array = []
 
 var _pressing: bool = false
 var _press_pos: Vector2 = Vector2.ZERO
@@ -51,8 +53,12 @@ func poke() -> void:
 	tw.tween_property(self, "scale", Vector2.ONE, 0.08)
 
 
-func start_flash() -> void:
+func start_flash(views: Array = []) -> void:
 	flash = 1.0
+	for v in views:
+		var s := str(v)
+		if s not in flash_views:
+			flash_views.append(s)
 	set_process(true)
 	queue_redraw()
 
@@ -60,11 +66,16 @@ func start_flash() -> void:
 func _process(delta: float) -> void:
 	if flash <= 0.0:
 		flash = 0.0
+		flash_views.clear()
 		set_process(false)
 		queue_redraw()
 		return
 	flash = maxf(0.0, flash - delta / 0.55)
 	queue_redraw()
+
+
+func _flashing(view_id: String) -> bool:
+	return flash > 0.0 and view_id in flash_views
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -135,6 +146,18 @@ func _lit(base: Color) -> Color:
 	if flash <= 0.0:
 		return base
 	return base.lerp(TileType.FLASH_LIT, clampf(flash, 0.0, 1.0) * 0.72)
+
+
+func _flash_a(mult: float = 0.65) -> float:
+	return clampf(flash, 0.0, 1.0) * mult
+
+
+func _sheen(a: float) -> Color:
+	return Color(TileType.FLASH_LIT.r, TileType.FLASH_LIT.g, TileType.FLASH_LIT.b, a)
+
+
+func _has_neighbor(t: int) -> bool:
+	return edge_n == t or edge_e == t or edge_s == t or edge_w == t
 
 
 func _draw_grass(r: Rect2) -> void:
@@ -253,12 +276,7 @@ func _draw_road(r: Rect2) -> void:
 	var m := minf(r.size.x, r.size.y)
 	var pad := m * 0.20
 	var body := Rect2(0.0, pad, r.size.x, r.size.y - pad * 2.0)
-	var shaded := (
-		edge_n == TileType.TREE
-		or edge_e == TileType.TREE
-		or edge_s == TileType.TREE
-		or edge_w == TileType.TREE
-	)
+	var shaded := _has_neighbor(TileType.TREE)
 	var plank := TileType.PATH_SHADE if shaded else TileType.ROAD_COL
 	var groove := TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE
 	draw_rect(Rect2(body.position + Vector2(0, 3), body.size), TileType.SHADOW)
@@ -268,6 +286,11 @@ func _draw_road(r: Rect2) -> void:
 	draw_line(Vector2(0.0, y1), Vector2(r.size.x, y1), _lit(groove), 1.6)
 	draw_line(Vector2(0.0, y2), Vector2(r.size.x, y2), _lit(groove), 1.6)
 	_draw_puddles(body)
+	# path: на тёмной рейке обычный _lit слабо виден — явный лаковый слой только при flash path.
+	if _flashing(DvorikSave.VIEW_PATH) and shaded:
+		draw_rect(body, _sheen(_flash_a(0.72)))
+		draw_line(Vector2(0.0, y1), Vector2(r.size.x, y1), _sheen(_flash_a(0.85)), 2.4)
+		draw_line(Vector2(0.0, y2), Vector2(r.size.x, y2), _sheen(_flash_a(0.85)), 2.4)
 
 
 func _draw_puddles(body: Rect2) -> void:
@@ -329,6 +352,12 @@ func _draw_tree(r: Rect2) -> void:
 		draw_circle(Vector2(0.0, c.y - m * 0.08), bridge_r, _lit(TileType.TREE_CROWN))
 	if edge_e == TileType.TREE:
 		draw_circle(Vector2(size.x, c.y - m * 0.08), bridge_r, _lit(TileType.TREE_CROWN))
+	# path / reeds: вторая фишка пары — явный лак на кроне (покойный вид тот же).
+	if _flashing(DvorikSave.VIEW_PATH) or _flashing(DvorikSave.VIEW_REEDS):
+		draw_set_transform(crown_c, 0.0, Vector2(stretch, stretch * 0.92))
+		draw_circle(Vector2.ZERO, m * 0.26, _sheen(_flash_a(0.70)))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		draw_rect(Rect2(trunk.position - Vector2(1, 1), trunk.size + Vector2(2, 2)), _sheen(_flash_a(0.55)))
 
 
 func _draw_water(r: Rect2) -> void:
@@ -376,6 +405,11 @@ func _draw_water(r: Rect2) -> void:
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	_draw_reflections(c, m)
 	_draw_reeds(c, m)
+	# reeds: лужа тоже блестит вместе с прутиками — обе фишки пары.
+	if _flashing(DvorikSave.VIEW_REEDS):
+		draw_set_transform(pc, 0.0, Vector2(sx, sy))
+		draw_circle(Vector2.ZERO, m * 0.30, _sheen(_flash_a(0.55)))
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 
 func _draw_reflections(c: Vector2, m: float) -> void:
@@ -424,5 +458,12 @@ func _reeds_at(base: Vector2, outward: Vector2, m: float) -> void:
 	var len2 := m * 0.13
 	var a := base + perp * m * 0.04
 	var b := base - perp * m * 0.05
-	draw_line(a, a + outward * len1 + perp * m * 0.02, col, 2.0)
-	draw_line(b, b + outward * len2 - perp * m * 0.015, col, 1.7)
+	var tip_a := a + outward * len1 + perp * m * 0.02
+	var tip_b := b + outward * len2 - perp * m * 0.015
+	# Тонкие прутики: при первой вспышке reeds — яркая подложка, иначе только обычные линии.
+	if _flashing(DvorikSave.VIEW_REEDS):
+		var glow := _sheen(_flash_a(0.90))
+		draw_line(a, tip_a, glow, 5.0)
+		draw_line(b, tip_b, glow, 4.5)
+	draw_line(a, tip_a, col, 2.0)
+	draw_line(b, tip_b, col, 1.7)

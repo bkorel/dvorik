@@ -95,9 +95,9 @@ func _neighbor_tile(gp: Vector2i) -> int:
 
 
 func _maybe_discover_views() -> void:
-	# Любой новый id вида — одна лаковая вспышка на затронутых фишках.
+	# Любой новый id вида — одна лаковая вспышка на затронутых фишках (обе стороны пары).
 	var fresh: Array = []
-	var flash_ids: Dictionary = {}
+	var flash_map: Dictionary = {}
 	for cell in _cells:
 		if cell.tile == TileType.EMPTY:
 			continue
@@ -109,13 +109,19 @@ func _maybe_discover_views() -> void:
 				continue
 			if vid not in fresh:
 				fresh.append(vid)
-			flash_ids[cell.get_instance_id()] = cell
+			var id: int = cell.get_instance_id()
+			if not flash_map.has(id):
+				flash_map[id] = {"cell": cell, "views": []}
+			var views: Array = flash_map[id]["views"]
+			if vid not in views:
+				views.append(vid)
 	if fresh.is_empty():
 		return
 	for vid in fresh:
 		_found.append(vid)
-	for cell in flash_ids.values():
-		cell.start_flash()
+	for entry in flash_map.values():
+		var c: Cell = entry["cell"]
+		c.start_flash(entry["views"])
 
 
 func _load() -> void:
@@ -125,6 +131,7 @@ func _load() -> void:
 	for i in _cells.size():
 		_cells[i].tile = int(grid[i])
 		_cells[i].flash = 0.0
+		_cells[i].flash_views.clear()
 		_cells[i].set_process(false)
 	for y in GRID:
 		for x in GRID:

@@ -1,0 +1,40 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Godot 4.3 and export templates
+        run: |
+          set -euo pipefail
+          GODOT_VERSION=4.3-stable
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          wget -q "https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          unzip -q "Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          sudo mv "Godot_v${GODOT_VERSION}_linux.x86_64" /usr/local/bin/godot
+          sudo chmod +x /usr/local/bin/godot
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.3.stable"
+          unzip -q "Godot_v${GODOT_VERSION}_export_templates.tpz" -d /tmp/godot-templates
+          mv /tmp/godot-templates/templates/* "$HOME/.local/share/godot/export_templates/4.3.stable/"
+
+      - name: Import project
+        run: godot --headless --import --quit || godot --headless --editor --quit || true
+
+      - name: Export debug APK
+        run: |
+          set -euo pipefail
+          mkdir -p export
+          godot --headless --verbose --export-debug "Android" export/dvorik-debug.apk
+          test -s export/dvorik-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dvorik-debug-apk
+          path: export/dvorik-debug.apk

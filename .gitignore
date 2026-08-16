@@ -1,0 +1,8 @@
+# Godot 4
+.godot/
+*.translation
+*.apk
+*.aab
+*.so
+export/
+android/build/

@@ -71,6 +71,7 @@ func _draw() -> void:
 		)
 		var a := Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.38)
 		draw_circle(p, rng.randf_range(0.7, 1.8), a)
+	TileArt.stone_grain(self, frame, 1, 1, 0.45)
 	# Слегка скошенный верхний кант — плита читается как крыша двора.
 	var bevel := side * 0.012
 	var hi := Color(0.42, 0.43, 0.46, 0.22)

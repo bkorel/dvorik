@@ -260,8 +260,9 @@ func _draw_house(r: Rect2) -> void:
 	var round_w := not conn_w
 	var round_e := not conn_e
 
-	# Тень объёма.
-	_draw_round_rect(Rect2(wall.position + Vector2(m * 0.045, m * 0.045), wall.size), TileType.SHADOW, m * 0.06)
+	# Тень объёма. Сдвиг только по Y — иначе на стыке домов тень
+	# вылезает за границу клетки и читается как щель в стене.
+	_draw_round_rect(Rect2(wall.position + Vector2(0.0, m * 0.06), wall.size), TileType.SHADOW, m * 0.06)
 
 	# Стена — плоское каменное тело во весь низ лунки.
 	TileArt.round_rect_sel(self, wall, _lit(TileType.STONE_MID), m * 0.06, round_w, round_e, round_w, round_e)
@@ -312,7 +313,9 @@ func _draw_roof_cap(wall_x0: float, wall_x1: float, roof_h: float, overhang: flo
 	var roof_x0 := wall_x0 - (overhang if round_w else 0.0)
 	var roof_x1 := wall_x1 + (overhang if round_e else 0.0)
 	var roof := Rect2(roof_x0, 0.0, roof_x1 - roof_x0, roof_h)
-	_draw_round_rect(Rect2(roof.position + Vector2(m * 0.035, m * 0.05), roof.size), TileType.SHADOW, m * 0.06)
+	# Тень плиты — только по Y. Сдвиг по X на стыке домов вылезает за
+	# соседнюю клетку и читается как щель в крыше (не улочка, а два бруска).
+	_draw_round_rect(Rect2(roof.position + Vector2(0.0, m * 0.07), roof.size), TileType.SHADOW, m * 0.06)
 	TileArt.round_rect_sel(self, roof, _lit(TileType.ROOF_SLAB), m * 0.065, round_w, round_e, round_w, round_e)
 	TileArt.stone_grain(self, roof, grid_x + 5, grid_y + 5, 0.6)
 	# Кант плиты: светлый верх, тёмный низ — читается толщина.
@@ -484,7 +487,9 @@ func _draw_water(r: Rect2) -> void:
 	var rbr := edge_s != TileType.WATER and edge_e != TileType.WATER
 	var c := body.get_center()
 
-	_draw_round_rect(Rect2(body.position + Vector2(m * 0.04, m * 0.05), body.size), TileType.SHADOW, rad)
+	# Тень только по Y — на стыке двух водоёмов сдвиг по X рвёт пруд на
+	# отдельные пятна вместо одного.
+	_draw_round_rect(Rect2(body.position + Vector2(0.0, m * 0.065), body.size), TileType.SHADOW, rad)
 	TileArt.round_rect_sel(self, body, _lit(TileType.WATER_RIM), rad, rtl, rtr, rbl, rbr)
 	var inner := body.grow(-m * 0.055)
 	TileArt.round_rect_sel(self, inner, _lit(TileType.WATER_DEEP), rad * 0.85, rtl, rtr, rbl, rbr)

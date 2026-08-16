@@ -12,10 +12,15 @@ const ORTHO: Array[Vector2i] = [
 
 var _cells: Array[Cell] = []
 var _found: Array = []
+var _knock: AudioStreamPlayer
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_knock = AudioStreamPlayer.new()
+	_knock.stream = DvorikKnock.make_stream()
+	_knock.volume_db = -6.0
+	add_child(_knock)
 	_build()
 	_load()
 	resized.connect(_relayout)
@@ -39,10 +44,35 @@ func _relayout() -> void:
 	var ox := (size.x - side) * 0.5
 	var oy := (size.y - side) * 0.5
 	for cell in _cells:
-		cell.position = Vector2(ox + float(cell.grid_x) * cell_s, oy + float(cell.grid_y) * cell_s)
 		cell.size = Vector2(cell_s, cell_s)
 		cell.pivot_offset = cell.size * 0.5
+		cell.sync_home(Vector2(ox + float(cell.grid_x) * cell_s, oy + float(cell.grid_y) * cell_s))
 		cell.queue_redraw()
+	queue_redraw()
+
+
+func _draw() -> void:
+	# Рама стола вокруг сетки — тёплое оливковое дерево.
+	if size.x <= 0.0 or size.y <= 0.0:
+		return
+	var side := minf(size.x, size.y)
+	var ox := (size.x - side) * 0.5
+	var oy := (size.y - side) * 0.5
+	var frame := Rect2(Vector2(ox, oy), Vector2(side, side)).grow(side * 0.018)
+	draw_rect(frame, TileType.TABLE_EDGE)
+	draw_rect(frame.grow(-side * 0.008), TileType.TABLE)
+	# Горизонтальное волокно стола.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 11
+	for i in 14:
+		var y := frame.position.y + rng.randf() * frame.size.y
+		var a := Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.35)
+		draw_line(
+			Vector2(frame.position.x + 2.0, y),
+			Vector2(frame.end.x - 2.0, y + rng.randf_range(-1.5, 1.5)),
+			a,
+			1.2
+		)
 
 
 func bind_palette(palette: Palette) -> void:
@@ -58,16 +88,42 @@ func _on_cell_tapped(cell: Cell) -> void:
 
 
 func try_place(x: int, y: int, tile: int) -> void:
-	var cell := _cell_at(Vector2i(x, y))
+	var gp := Vector2i(x, y)
+	var cell := _cell_at(gp)
 	# тот же тип — тычок без смены вида, сейв не трогаем
 	if cell.tile == tile:
 		cell.poke()
 		return
+	var was_empty := cell.tile == TileType.EMPTY
 	cell.tile = tile
 	cell.queue_redraw()
-	_refresh_edges(Vector2i(x, y))
+	if was_empty:
+		cell.grow()
+	else:
+		_relay_neighbors(gp)
+	_play_knock()
+	_refresh_edges(gp)
 	_maybe_discover_views()
 	_save()
+
+
+func _relay_neighbors(gp: Vector2i) -> void:
+	# Соседи слегка сдвигаются от переложенной фишки и щёлкают на место.
+	for d in ORTHO:
+		var n: Vector2i = gp + d
+		if not _in_bounds(n):
+			continue
+		var neighbor := _cell_at(n)
+		if neighbor.tile == TileType.EMPTY:
+			continue
+		neighbor.nudge(Vector2(d))
+
+
+func _play_knock() -> void:
+	if _knock == null or _knock.stream == null:
+		return
+	_knock.stop()
+	_knock.play()
 
 
 func _refresh_edges(gp: Vector2i) -> void:
@@ -133,6 +189,7 @@ func _load() -> void:
 		_cells[i].flash = 0.0
 		_cells[i].flash_views.clear()
 		_cells[i].set_process(false)
+		_cells[i].reset_motion()
 	for y in GRID:
 		for x in GRID:
 			_update_joins(Vector2i(x, y))

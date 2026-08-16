@@ -95,8 +95,9 @@ func _finish_press(pos: Vector2) -> void:
 func _draw() -> void:
 	if size.x <= 0.0:
 		return
-	draw_rect(Rect2(Vector2.ZERO, size), TileType.WOOD_DARK)
-	draw_rect(Rect2(Vector2(6, 6), size - Vector2(12, 12)), TileType.WOOD_MID)
+	# Та же оливковая древесина, что у стола.
+	draw_rect(Rect2(Vector2.ZERO, size), TileType.TABLE_EDGE)
+	draw_rect(Rect2(Vector2(6, 6), size - Vector2(12, 12)), TileType.TABLE)
 	for i in _btn.size():
 		_draw_button(_btn[i], TYPES[i], TYPES[i] == selected)
 
@@ -104,42 +105,45 @@ func _draw() -> void:
 func _draw_button(rect: Rect2, tile: int, raised: bool) -> void:
 	var lift := Vector2(0.0, -rect.size.y * 0.10) if raised else Vector2.ZERO
 	var r := Rect2(rect.position + lift, rect.size)
-	draw_rect(Rect2(r.position + Vector2(3, 5), r.size), TileType.SHADOW)
-	draw_rect(r, TileType.WOOD_LIGHT if raised else TileType.WOOD_PALE)
+	var m := minf(r.size.x, r.size.y)
+	# Выемка-кнопка; выбранная — приподнята.
+	draw_rect(Rect2(r.position + Vector2(m * 0.04, m * 0.06), r.size), TileType.SHADOW)
+	draw_rect(r, TileType.TABLE_RIDGE if raised else TileType.TABLE_RECESS)
+	var well := r.grow(-m * 0.08)
+	draw_rect(well, TileType.TABLE if raised else TileType.TABLE_RECESS)
 	var inner := r.grow(-r.size.x * 0.16)
 	match tile:
 		TileType.HOUSE:
-			draw_rect(inner, TileType.WOOD_PALE)
+			var body := Rect2(inner.position.x, inner.position.y + inner.size.y * 0.22, inner.size.x, inner.size.y * 0.62)
+			draw_rect(Rect2(body.position + Vector2(2, 3), body.size), TileType.SHADOW)
+			draw_rect(body, TileType.WOOD_PALE)
 			var mid := inner.get_center()
 			draw_colored_polygon(
 				PackedVector2Array([
-					Vector2(inner.position.x + 2.0, inner.position.y + inner.size.y * 0.28),
+					Vector2(inner.position.x + 2.0, inner.position.y + inner.size.y * 0.32),
 					Vector2(mid.x, inner.position.y + 2.0),
-					Vector2(inner.end.x - 2.0, inner.position.y + inner.size.y * 0.28),
+					Vector2(inner.end.x - 2.0, inner.position.y + inner.size.y * 0.32),
 				]),
-				TileType.WOOD_DARK
-			)
-			draw_line(
-				Vector2(mid.x, inner.position.y + 3.0),
-				Vector2(mid.x, inner.end.y - 3.0),
-				TileType.WOOD_RIDGE,
-				3.0
+				TileType.WOOD_ROOF
 			)
 		TileType.ROAD:
-			var pad := inner.size.y * 0.28
-			draw_rect(Rect2(inner.position.x, inner.position.y + pad, inner.size.x, inner.size.y - pad * 2.0), TileType.ROAD_COL)
+			var pad := inner.size.y * 0.30
+			var plank := Rect2(inner.position.x, inner.position.y + pad, inner.size.x, inner.size.y - pad * 2.0)
+			draw_rect(Rect2(plank.position + Vector2(2, 3), plank.size), TileType.SHADOW)
+			draw_rect(plank, TileType.ROAD_COL)
+			var y1 := plank.position.y + plank.size.y * 0.35
+			draw_line(Vector2(plank.position.x, y1), Vector2(plank.end.x, y1), TileType.ROAD_GROOVE, 1.5)
 		TileType.TREE:
 			var c := inner.get_center()
-			var m := minf(inner.size.x, inner.size.y)
-			draw_rect(Rect2(c.x - m * 0.06, c.y, m * 0.12, m * 0.22), TileType.TREE_TRUNK)
-			draw_circle(c + Vector2(0.0, -m * 0.08), m * 0.22, TileType.TREE_CROWN)
-			draw_circle(c + Vector2(-m * 0.07, -m * 0.14), m * 0.07, TileType.TREE_CROWN_HI)
+			var tm := minf(inner.size.x, inner.size.y)
+			draw_circle(c + Vector2(tm * 0.04, tm * 0.06), tm * 0.10, TileType.SHADOW)
+			draw_rect(Rect2(c.x - tm * 0.06, c.y, tm * 0.12, tm * 0.24), TileType.TREE_TRUNK)
+			draw_circle(c + Vector2(0.0, -tm * 0.08), tm * 0.24, TileType.TREE_CROWN)
+			draw_circle(c + Vector2(-tm * 0.08, -tm * 0.14), tm * 0.08, TileType.TREE_CROWN_HI)
 		TileType.WATER:
 			var wc := inner.get_center()
 			var wm := minf(inner.size.x, inner.size.y)
-			draw_set_transform(wc, 0.0, Vector2(1.25, 0.68))
-			draw_circle(Vector2.ZERO, wm * 0.28, TileType.WATER_DEEP)
-			draw_circle(Vector2.ZERO, wm * 0.22, TileType.WATER_COL)
-			draw_set_transform(wc + Vector2(-wm * 0.08, -wm * 0.06), 0.0, Vector2(1.0, 0.5))
-			draw_circle(Vector2.ZERO, wm * 0.07, TileType.WATER_GLOSS)
-			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+			draw_circle(wc + Vector2(wm * 0.04, wm * 0.05), wm * 0.28, TileType.SHADOW)
+			draw_circle(wc, wm * 0.28, TileType.WATER_RIM)
+			draw_circle(wc, wm * 0.20, TileType.WATER_COL)
+			draw_circle(wc + Vector2(-wm * 0.08, -wm * 0.08), wm * 0.06, TileType.WATER_GLOSS)

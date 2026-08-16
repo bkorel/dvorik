@@ -57,15 +57,6 @@ func reset_motion() -> void:
 	position = home_pos
 
 
-func has_street_edge() -> bool:
-	return tile == TileType.HOUSE and (
-		edge_n == TileType.HOUSE
-		or edge_e == TileType.HOUSE
-		or edge_s == TileType.HOUSE
-		or edge_w == TileType.HOUSE
-	)
-
-
 func poke() -> void:
 	# Тот же тип — лёгкий тычок, вид не меняется. Без роста.
 	_begin_motion()
@@ -75,7 +66,7 @@ func poke() -> void:
 
 
 func grow() -> void:
-	# Постановка на пустую: рука сажает фишку на стол (короткий settle, не падение с неба).
+	# Постановка на пустую: рука сажает фишку на плиту (короткий settle, не падение с неба).
 	_begin_motion()
 	pivot_offset = size * 0.5
 	scale = Vector2(0.78, 0.78)
@@ -215,30 +206,31 @@ func _has_neighbor(t: int) -> bool:
 
 
 func _draw_slot(r: Rect2) -> void:
-	# Выемка с закруглёнными углами: свет сверху-слева, тень снизу-справа.
+	# Лунка-выемка в каменной плите: тёмный пол, холодный кант.
 	var m := minf(r.size.x, r.size.y)
-	var inset := m * 0.06
+	var inset := m * 0.05
 	var slot := r.grow(-inset)
 	draw_rect(r, TileType.TABLE_RIDGE)
-	_draw_round_rect(slot.grow(1.5), TileType.TABLE_EDGE, m * 0.12)
-	_draw_round_rect(slot, TileType.TABLE_RECESS, m * 0.11)
-	# Волокно внутри выемки.
+	_draw_round_rect(slot.grow(1.8), TileType.TABLE_EDGE, m * 0.10)
+	_draw_round_rect(slot, TileType.TABLE_RECESS, m * 0.09)
+	# Холодная зернистость камня внутри лунки.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = grid_x * 17 + grid_y * 31 + 4
-	var fiber := Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.45)
-	for i in 5:
-		var y0 := slot.position.y + rng.randf() * slot.size.y
-		draw_line(
-			Vector2(slot.position.x + 2.0, y0),
-			Vector2(slot.end.x - 2.0, y0 + rng.randf_range(-1.0, 1.0)),
-			fiber,
-			1.1
+	var grit := Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.40)
+	for i in 6:
+		var p := Vector2(
+			slot.position.x + rng.randf() * slot.size.x,
+			slot.position.y + rng.randf() * slot.size.y
 		)
-	# Блик по верхнему краю гребня, тень по нижнему.
-	var hi := Color(1.0, 1.0, 0.85, 0.14)
-	var sh := Color(0.05, 0.04, 0.02, 0.22)
-	draw_line(Vector2(slot.position.x, slot.position.y), Vector2(slot.end.x, slot.position.y), hi, 2.0)
+		draw_circle(p, rng.randf_range(0.6, 1.4), grit)
+	TileArt.stone_grain(self, slot, grid_x, grid_y, 0.5)
+	# Светлый кант сверху-слева, тень снизу-справа.
+	var hi := Color(0.55, 0.56, 0.58, 0.16)
+	var sh := Color(0.02, 0.02, 0.03, 0.35)
+	draw_line(Vector2(slot.position.x, slot.position.y), Vector2(slot.end.x, slot.position.y), hi, 1.8)
+	draw_line(Vector2(slot.position.x, slot.position.y), Vector2(slot.position.x, slot.end.y), hi, 1.4)
 	draw_line(Vector2(slot.position.x, slot.end.y), Vector2(slot.end.x, slot.end.y), sh, 2.2)
+	draw_line(Vector2(slot.end.x, slot.position.y), Vector2(slot.end.x, slot.end.y), sh, 1.6)
 
 
 func _draw_round_rect(rect: Rect2, col: Color, rad: float) -> void:
@@ -252,78 +244,89 @@ func _draw_round_rect(rect: Rect2, col: Color, rad: float) -> void:
 
 
 func _draw_house(r: Rect2) -> void:
-	# Один дом = одна клетка: брусок + треугольная горчичная крыша сверху.
+	# Низкий каменный объём во всю лунку + тёмная плита крыши сверху, с нахлёстом.
+	# Улочка: стены и крыша идут до самого ребра, без щели пола между домами.
 	var m := minf(r.size.x, r.size.y)
-	var pad := m * 0.14
-	var body := Rect2(Vector2(pad, pad + m * 0.06), Vector2(r.size.x - pad * 2.0, r.size.y - pad * 2.05))
-	# Тень фишки вниз-вправо.
-	_draw_round_rect(Rect2(body.position + Vector2(m * 0.04, m * 0.05), body.size), TileType.SHADOW, m * 0.06)
-	_draw_round_rect(body, _lit(TileType.WOOD_PALE), m * 0.05)
-	_draw_round_rect(body.grow(-m * 0.03), _lit(TileType.WOOD_LIGHT), m * 0.04)
-	_draw_wood_grain(body, grid_x * 3 + grid_y)
-	_draw_ridges(body)
-	_draw_porches(body)
-	_draw_yards(body)
+	var conn_e := edge_e == TileType.HOUSE
+	var conn_w := edge_w == TileType.HOUSE
+
+	var pad := m * 0.13
+	var roof_h := size.y * 0.40
+	var overhang := m * 0.075
+
+	var wall_x0 := 0.0 if conn_w else pad
+	var wall_x1 := size.x if conn_e else size.x - pad
+	var wall := Rect2(wall_x0, roof_h, wall_x1 - wall_x0, size.y - roof_h)
+	var round_w := not conn_w
+	var round_e := not conn_e
+
+	# Тень объёма. Сдвиг только по Y — иначе на стыке домов тень
+	# вылезает за границу клетки и читается как щель в стене.
+	_draw_round_rect(Rect2(wall.position + Vector2(0.0, m * 0.06), wall.size), TileType.SHADOW, m * 0.06)
+
+	# Стена — плоское каменное тело во весь низ лунки.
+	TileArt.round_rect_sel(self, wall, _lit(TileType.STONE_MID), m * 0.06, round_w, round_e, round_w, round_e)
+	# Светлая передняя грань снизу — читается объём с ¾.
+	var face_h := wall.size.y * 0.32
+	var face := Rect2(wall.position.x, wall.end.y - face_h, wall.size.x, face_h)
+	TileArt.round_rect_sel(self, face, _lit(TileType.STONE_FACE), m * 0.05, false, false, round_w, round_e)
+	draw_line(Vector2(wall.position.x, face.position.y), Vector2(wall.end.x, face.position.y), _lit(TileType.STONE_DARK), 1.5)
+	TileArt.stone_grain(self, wall, grid_x, grid_y, 0.85)
+	_draw_masonry(wall, grid_x * 3 + grid_y)
+
+	# Дверь — по центру собственной клетки, не зависит от объединения со street.
+	var door_w := m * 0.17
+	var door_h := face_h * 0.94
+	var door := Rect2(r.get_center().x - door_w * 0.5, wall.end.y - door_h, door_w, door_h)
+	draw_rect(door, _lit(TileType.STONE_DARK))
+	draw_rect(door, _lit(TileType.ROOF_EDGE), false, 1.2)
+
+	# Стык со street: каждый дом всё равно свой — тонкий шов кладки на границе.
+	if conn_w:
+		draw_line(Vector2(0.0, roof_h + 1.0), Vector2(0.0, size.y - 1.0), _lit(TileType.STONE_DARK), 1.6)
+	if conn_e:
+		draw_line(Vector2(size.x, roof_h + 1.0), Vector2(size.x, size.y - 1.0), _lit(TileType.STONE_DARK), 1.6)
+
+	_draw_roof_cap(wall_x0, wall_x1, roof_h, overhang, round_w, round_e, m)
+	_draw_porches(wall)
+	_draw_yards(wall)
 
 
-func _draw_wood_grain(body: Rect2, grain_seed: int) -> void:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = grain_seed + 99
-	var g := Color(TileType.WOOD_MID.r, TileType.WOOD_MID.g, TileType.WOOD_MID.b, 0.35)
-	for i in 4:
-		var y := body.position.y + body.size.y * (0.2 + float(i) * 0.18)
-		draw_line(Vector2(body.position.x + 2.0, y), Vector2(body.end.x - 2.0, y + rng.randf_range(-1.0, 1.0)), g, 1.0)
+func _draw_masonry(wall: Rect2, grain_seed: int) -> void:
+	# Курсы кладки — иначе стена читается как гладкий пластиковый брусок.
+	var col := Color(TileType.STONE_DARK.r, TileType.STONE_DARK.g, TileType.STONE_DARK.b, 0.42)
+	var rows := 3
+	for i in range(1, rows):
+		var y := wall.position.y + wall.size.y * (float(i) / float(rows))
+		draw_line(Vector2(wall.position.x + 1.0, y), Vector2(wall.end.x - 1.0, y), col, 1.1)
+	for i in rows:
+		var y0 := wall.position.y + wall.size.y * (float(i) / float(rows))
+		var y1 := wall.position.y + wall.size.y * (float(i + 1) / float(rows))
+		var offset := wall.size.x * 0.5 if i % 2 == 0 else wall.size.x * 0.22
+		var x := wall.position.x + fmod(offset, maxf(wall.size.x, 0.01))
+		if x > wall.position.x + 2.0 and x < wall.end.x - 2.0:
+			draw_line(Vector2(x, y0 + 1.0), Vector2(x, y1 - 1.0), col, 1.0)
 
 
-func _draw_ridges(body: Rect2) -> void:
-	# Одинокий дом — горчичный треугольник. Дом+дом — общий конёк на ребре.
-	var col := _lit(TileType.WOOD_RIDGE)
-	var w := maxf(3.5, minf(size.x, size.y) * 0.075)
-	var mid := body.get_center()
-	var inset := 4.0
-	if not has_street_edge():
-		var peak := Vector2(mid.x, body.position.y - size.y * 0.02)
-		var roof := PackedVector2Array([
-			Vector2(body.position.x + 1.0, body.position.y + inset + 5.0),
-			peak,
-			Vector2(body.end.x - 1.0, body.position.y + inset + 5.0),
-		])
-		# Тень крыши.
-		draw_colored_polygon(
-			PackedVector2Array([
-				roof[0] + Vector2(2, 3),
-				roof[1] + Vector2(2, 3),
-				roof[2] + Vector2(2, 3),
-			]),
-			TileType.SHADOW
-		)
-		draw_colored_polygon(roof, _lit(TileType.WOOD_ROOF))
-		draw_line(roof[0], roof[1], _lit(TileType.WOOD_ROOF_EDGE), 1.6)
-		draw_line(roof[1], roof[2], _lit(TileType.WOOD_ROOF_EDGE), 1.6)
-		draw_line(Vector2(mid.x, peak.y), Vector2(mid.x, body.end.y - inset), col, w * 0.55)
-		return
-	if edge_n == TileType.HOUSE:
-		draw_line(Vector2(mid.x, 0.0), Vector2(mid.x, mid.y), col, w)
-	if edge_s == TileType.HOUSE:
-		draw_line(Vector2(mid.x, mid.y), Vector2(mid.x, size.y), col, w)
-	if edge_w == TileType.HOUSE:
-		draw_line(Vector2(0.0, mid.y), Vector2(mid.x, mid.y), col, w)
-	if edge_e == TileType.HOUSE:
-		draw_line(Vector2(mid.x, mid.y), Vector2(size.x, mid.y), col, w)
-	if edge_n == TileType.HOUSE:
-		draw_circle(Vector2(mid.x, 0.0), w * 0.65, col)
-	if edge_s == TileType.HOUSE:
-		draw_circle(Vector2(mid.x, size.y), w * 0.65, col)
-	if edge_w == TileType.HOUSE:
-		draw_circle(Vector2(0.0, mid.y), w * 0.65, col)
-	if edge_e == TileType.HOUSE:
-		draw_circle(Vector2(size.x, mid.y), w * 0.65, col)
+func _draw_roof_cap(wall_x0: float, wall_x1: float, roof_h: float, overhang: float, round_w: bool, round_e: bool, m: float) -> void:
+	# Тёмная плита крыши, шире стены — читается как крыша, не как цветная полоска.
+	var roof_x0 := wall_x0 - (overhang if round_w else 0.0)
+	var roof_x1 := wall_x1 + (overhang if round_e else 0.0)
+	var roof := Rect2(roof_x0, 0.0, roof_x1 - roof_x0, roof_h)
+	# Тень плиты — только по Y. Сдвиг по X на стыке домов вылезает за
+	# соседнюю клетку и читается как щель в крыше (не улочка, а два бруска).
+	_draw_round_rect(Rect2(roof.position + Vector2(0.0, m * 0.07), roof.size), TileType.SHADOW, m * 0.06)
+	TileArt.round_rect_sel(self, roof, _lit(TileType.ROOF_SLAB), m * 0.065, round_w, round_e, round_w, round_e)
+	TileArt.stone_grain(self, roof, grid_x + 5, grid_y + 5, 0.6)
+	# Кант плиты: светлый верх, тёмный низ — читается толщина.
+	draw_line(Vector2(roof.position.x + 2.0, roof.position.y + 1.2), Vector2(roof.end.x - 2.0, roof.position.y + 1.2), _lit(TileType.ROOF_SHEEN), 1.8)
+	draw_line(Vector2(roof.position.x, roof.end.y), Vector2(roof.end.x, roof.end.y), _lit(TileType.ROOF_EDGE), 2.6)
 
 
 func _draw_porches(body: Rect2) -> void:
-	# house+road: маленький порожек у дома к рейке.
+	# house+road: каменный порожек к шву.
 	var m := minf(size.x, size.y)
-	var thick := m * 0.10
+	var thick := m * 0.09
 	var span := m * 0.34
 	var col := _lit(TileType.PORCH)
 	var edge := _lit(TileType.PORCH_EDGE)
@@ -346,9 +349,9 @@ func _draw_porches(body: Rect2) -> void:
 
 
 func _draw_yards(body: Rect2) -> void:
-	# house+tree: куст-колышек у стены дома.
+	# house+tree: тёмный куст у стены.
 	var m := minf(size.x, size.y)
-	var peg_r := m * 0.045
+	var peg_r := m * 0.04
 	var bush_r := m * 0.09
 	if edge_n == TileType.TREE:
 		_yard_at(Vector2(body.get_center().x, body.position.y + m * 0.02), peg_r, bush_r)
@@ -366,35 +369,31 @@ func _yard_at(p: Vector2, peg_r: float, bush_r: float) -> void:
 
 
 func _draw_road(r: Rect2) -> void:
-	# Дорога — плоская тёмная рейка-планка в выемке.
+	# Одна каменная плита от края до края лунки, с одним тонким швом.
+	# Один слой, без внутренних полос — иначе читается решёткой.
 	var m := minf(r.size.x, r.size.y)
-	var pad := m * 0.22
-	var body := Rect2(m * 0.06, pad, r.size.x - m * 0.12, r.size.y - pad * 2.0)
 	var shaded := _has_neighbor(TileType.TREE)
-	var plank := TileType.PATH_SHADE if shaded else TileType.ROAD_COL
-	var groove := TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE
-	_draw_round_rect(Rect2(body.position + Vector2(m * 0.03, m * 0.04), body.size), TileType.SHADOW, m * 0.04)
-	_draw_round_rect(body, _lit(plank), m * 0.04)
-	var y1 := body.position.y + body.size.y * 0.32
-	var y2 := body.position.y + body.size.y * 0.68
-	draw_line(Vector2(body.position.x + 2.0, y1), Vector2(body.end.x - 2.0, y1), _lit(groove), 1.6)
-	draw_line(Vector2(body.position.x + 2.0, y2), Vector2(body.end.x - 2.0, y2), _lit(groove), 1.6)
-	# Светлый торец планки сверху-слева.
-	draw_line(
-		Vector2(body.position.x + 2.0, body.position.y + 2.0),
-		Vector2(body.end.x - 2.0, body.position.y + 2.0),
-		Color(1.0, 0.95, 0.8, 0.18),
-		1.5
-	)
-	_draw_puddles(body)
+	var pad_y := size.y * 0.28
+	var plate := Rect2(0.0, pad_y, size.x, size.y - pad_y * 2.0)
+	var fill := TileType.PATH_SHADE if shaded else TileType.ROAD_COL
+	var seam := TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE
+	_draw_round_rect(Rect2(plate.position + Vector2(0.0, m * 0.035), plate.size), TileType.SHADOW, m * 0.07)
+	_draw_round_rect(plate, _lit(fill), m * 0.07)
+	TileArt.stone_grain(self, plate, grid_x + 11, grid_y + 11, 0.75)
+	# Один тонкий шов посередине — не полоса, линия.
+	var y_mid := plate.get_center().y
+	draw_line(Vector2(plate.position.x + 2.0, y_mid), Vector2(plate.end.x - 2.0, y_mid), _lit(seam), 2.4)
+	# Холодный блик по верхнему краю плиты, тень по нижнему.
+	draw_line(Vector2(plate.position.x + 1.0, plate.position.y + 1.2), Vector2(plate.end.x - 1.0, plate.position.y + 1.2), Color(0.60, 0.61, 0.64, 0.22), 1.5)
+	draw_line(Vector2(plate.position.x, plate.end.y - 1.0), Vector2(plate.end.x, plate.end.y - 1.0), Color(0.02, 0.02, 0.03, 0.40), 1.6)
+	_draw_puddles(plate)
 	if _flashing(DvorikSave.VIEW_PATH) and shaded:
-		draw_rect(body, _sheen(_flash_a(0.72)))
-		draw_line(Vector2(body.position.x, y1), Vector2(body.end.x, y1), _sheen(_flash_a(0.85)), 2.4)
-		draw_line(Vector2(body.position.x, y2), Vector2(body.end.x, y2), _sheen(_flash_a(0.85)), 2.4)
+		draw_rect(plate, _sheen(_flash_a(0.55)))
+		draw_line(Vector2(plate.position.x, y_mid), Vector2(plate.end.x, y_mid), _sheen(_flash_a(0.9)), 2.8)
 
 
 func _draw_puddles(body: Rect2) -> void:
-	# road+water: одно синее пятно на рейке (не мост).
+	# road+water: тёмное масляное пятно на шве.
 	var m := minf(size.x, size.y)
 	var rad := m * 0.11
 	if edge_n == TileType.WATER:
@@ -415,102 +414,110 @@ func _puddle_at(c: Vector2, rad: float) -> void:
 
 
 func _draw_tree(r: Rect2) -> void:
-	# Дерево — зелёный шар на колышке; лак и блик сверху-слева.
+	# Живой тёмный ясень/сосна. Кроны рощи сплетены.
 	var m := minf(r.size.x, r.size.y)
 	var c := r.get_center()
 	var pull := Vector2.ZERO
 	var stretch := 1.0
 	if edge_n == TileType.TREE:
-		pull.y -= m * 0.16
-		stretch = maxf(stretch, 1.22)
+		pull.y -= m * 0.18
+		stretch = maxf(stretch, 1.28)
 	if edge_s == TileType.TREE:
-		pull.y += m * 0.16
-		stretch = maxf(stretch, 1.22)
+		pull.y += m * 0.18
+		stretch = maxf(stretch, 1.28)
 	if edge_w == TileType.TREE:
-		pull.x -= m * 0.16
-		stretch = maxf(stretch, 1.22)
+		pull.x -= m * 0.18
+		stretch = maxf(stretch, 1.28)
 	if edge_e == TileType.TREE:
-		pull.x += m * 0.16
-		stretch = maxf(stretch, 1.22)
-	var crown_c := c + pull + Vector2(0.0, -m * 0.10)
-	draw_circle(c + Vector2(m * 0.04, m * 0.07), m * 0.11, TileType.SHADOW)
-	var trunk := Rect2(c.x - m * 0.065, c.y + m * 0.00, m * 0.13, m * 0.26)
-	_draw_round_rect(trunk, _lit(TileType.TREE_TRUNK), m * 0.03)
-	draw_set_transform(crown_c, 0.0, Vector2(stretch, stretch * 0.92))
-	draw_circle(Vector2.ZERO, m * 0.25, _lit(TileType.TREE_CROWN))
-	draw_set_transform(crown_c + Vector2(-m * 0.09, -m * 0.08), 0.0, Vector2.ONE)
-	draw_circle(Vector2.ZERO, m * 0.08, _lit(TileType.TREE_CROWN_HI))
+		pull.x += m * 0.18
+		stretch = maxf(stretch, 1.28)
+	var crown_c := c + pull + Vector2(0.0, -m * 0.12)
+	draw_circle(c + Vector2(m * 0.04, m * 0.08), m * 0.10, TileType.SHADOW)
+	var trunk := Rect2(c.x - m * 0.05, c.y - m * 0.02, m * 0.10, m * 0.28)
+	_draw_round_rect(trunk, _lit(TileType.TREE_TRUNK), m * 0.02)
+	# Многослойная крона — живая, не скелет.
+	draw_set_transform(crown_c, 0.0, Vector2(stretch, stretch * 0.90))
+	draw_circle(Vector2.ZERO, m * 0.26, _lit(TileType.TREE_CROWN_LO))
+	draw_circle(Vector2(-m * 0.08, -m * 0.04), m * 0.18, _lit(TileType.TREE_CROWN))
+	draw_circle(Vector2(m * 0.09, -m * 0.02), m * 0.16, _lit(TileType.TREE_CROWN))
+	draw_circle(Vector2(0.0, -m * 0.10), m * 0.14, _lit(TileType.TREE_CROWN_HI))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	var bridge_r := m * 0.14
+	var bridge_r := m * 0.16
 	if edge_n == TileType.TREE:
-		draw_circle(Vector2(c.x, 0.0), bridge_r, _lit(TileType.TREE_CROWN))
+		_grove_bridge(Vector2(c.x, 0.0), bridge_r)
 	if edge_s == TileType.TREE:
-		draw_circle(Vector2(c.x, size.y), bridge_r, _lit(TileType.TREE_CROWN))
+		_grove_bridge(Vector2(c.x, size.y), bridge_r)
 	if edge_w == TileType.TREE:
-		draw_circle(Vector2(0.0, c.y - m * 0.08), bridge_r, _lit(TileType.TREE_CROWN))
+		_grove_bridge(Vector2(0.0, c.y - m * 0.10), bridge_r)
 	if edge_e == TileType.TREE:
-		draw_circle(Vector2(size.x, c.y - m * 0.08), bridge_r, _lit(TileType.TREE_CROWN))
+		_grove_bridge(Vector2(size.x, c.y - m * 0.10), bridge_r)
 	if _flashing(DvorikSave.VIEW_PATH) or _flashing(DvorikSave.VIEW_REEDS):
-		draw_set_transform(crown_c, 0.0, Vector2(stretch, stretch * 0.92))
-		draw_circle(Vector2.ZERO, m * 0.26, _sheen(_flash_a(0.70)))
+		draw_set_transform(crown_c, 0.0, Vector2(stretch, stretch * 0.90))
+		draw_circle(Vector2.ZERO, m * 0.27, _sheen(_flash_a(0.70)))
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		draw_rect(Rect2(trunk.position - Vector2(1, 1), trunk.size + Vector2(2, 2)), _sheen(_flash_a(0.55)))
 
 
-func _draw_water(r: Rect2) -> void:
-	# Вода — круглая фишка: деревянный ободок + глянцевая синяя лужа.
+func _grove_bridge(p: Vector2, rad: float) -> void:
+	draw_circle(p, rad, _lit(TileType.TREE_CROWN))
+	draw_circle(p + Vector2(-rad * 0.35, -rad * 0.15), rad * 0.55, _lit(TileType.TREE_CROWN_HI))
+	draw_circle(p + Vector2(rad * 0.30, rad * 0.10), rad * 0.50, _lit(TileType.TREE_CROWN_LO))
+
+
+func _water_body_rect(r: Rect2) -> Rect2:
+	# Пруд: чаша идёт до ребра там, где сосед тоже вода — сливается в одно
+	# пятно без «талии» между соседними чашами.
 	var m := minf(r.size.x, r.size.y)
-	var c := r.get_center() + Vector2(0.0, m * 0.02)
-	var pull := Vector2.ZERO
-	var sx := 1.0
-	var sy := 1.0
-	if edge_n == TileType.WATER:
-		pull.y -= m * 0.18
-		sy = maxf(sy, 1.15)
-	if edge_s == TileType.WATER:
-		pull.y += m * 0.18
-		sy = maxf(sy, 1.15)
-	if edge_w == TileType.WATER:
-		pull.x -= m * 0.18
-		sx = maxf(sx, 1.35)
-	if edge_e == TileType.WATER:
-		pull.x += m * 0.18
-		sx = maxf(sx, 1.35)
-	var pc := c + pull
-	var rad := m * 0.30
-	draw_set_transform(pc + Vector2(m * 0.04, m * 0.05), 0.0, Vector2(sx, sy))
-	draw_circle(Vector2.ZERO, rad, TileType.SHADOW)
-	draw_set_transform(pc, 0.0, Vector2(sx, sy))
-	draw_circle(Vector2.ZERO, rad, _lit(TileType.WATER_RIM))
-	draw_circle(Vector2.ZERO, rad * 0.78, _lit(TileType.WATER_DEEP))
-	draw_circle(Vector2.ZERO, rad * 0.68, _lit(TileType.WATER_COL))
-	draw_set_transform(pc + Vector2(-m * 0.10, -m * 0.09), 0.0, Vector2(1.05, 0.55))
-	draw_circle(Vector2.ZERO, m * 0.07, _lit(TileType.WATER_GLOSS))
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	var join_r := m * 0.20
-	if edge_n == TileType.WATER:
-		draw_set_transform(Vector2(c.x, 0.0), 0.0, Vector2(1.15, 0.75))
-		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
-	if edge_s == TileType.WATER:
-		draw_set_transform(Vector2(c.x, size.y), 0.0, Vector2(1.15, 0.75))
-		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
-	if edge_w == TileType.WATER:
-		draw_set_transform(Vector2(0.0, c.y), 0.0, Vector2(0.75, 1.1))
-		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
-	if edge_e == TileType.WATER:
-		draw_set_transform(Vector2(size.x, c.y), 0.0, Vector2(0.75, 1.1))
-		draw_circle(Vector2.ZERO, join_r, _lit(TileType.WATER_COL))
+	var pad := m * 0.17
+	var x0 := 0.0 if edge_w == TileType.WATER else pad
+	var x1 := r.size.x if edge_e == TileType.WATER else r.size.x - pad
+	var y0 := 0.0 if edge_n == TileType.WATER else pad
+	var y1 := r.size.y if edge_s == TileType.WATER else r.size.y - pad
+	return Rect2(Vector2(x0, y0), Vector2(x1 - x0, y1 - y0))
+
+
+func _draw_water(r: Rect2) -> void:
+	# Круглая чаша: каменный обод + чёрное масло с тусклым бликом. Не синяя монета.
+	var m := minf(r.size.x, r.size.y)
+	var body := _water_body_rect(r)
+	var rad := minf(body.size.x, body.size.y) * 0.5
+	var open_n := edge_n != TileType.WATER
+	var open_e := edge_e != TileType.WATER
+	var open_s := edge_s != TileType.WATER
+	var open_w := edge_w != TileType.WATER
+	var rtl := open_n and open_w
+	var rtr := open_n and open_e
+	var rbl := open_s and open_w
+	var rbr := open_s and open_e
+	var c := body.get_center()
+
+	# Тень только по Y — на стыке двух водоёмов сдвиг по X рвёт пруд на
+	# отдельные пятна вместо одного.
+	_draw_round_rect(Rect2(body.position + Vector2(0.0, m * 0.065), body.size), TileType.SHADOW, rad)
+	TileArt.round_rect_sel(self, body, _lit(TileType.WATER_RIM), rad, rtl, rtr, rbl, rbr)
+	# Отступ внутренних слоёв только с открытых сторон — иначе на стыке
+	# нескольких чаш (пруд 2×2 и больше) обод проступает крестом.
+	var inner := TileArt.inset_open(body, m * 0.055, open_w, open_e, open_n, open_s)
+	TileArt.round_rect_sel(self, inner, _lit(TileType.WATER_DEEP), rad * 0.85, rtl, rtr, rbl, rbr)
+	var inner2 := TileArt.inset_open(body, m * 0.10, open_w, open_e, open_n, open_s)
+	TileArt.round_rect_sel(self, inner2, _lit(TileType.WATER_COL), rad * 0.75, rtl, rtr, rbl, rbr)
+	# Тусклый блик масла — один, у центра всей лужи.
+	draw_set_transform(c + Vector2(-body.size.x * 0.14, -body.size.y * 0.16), 0.0, Vector2(1.15, 0.45))
+	draw_circle(Vector2.ZERO, m * 0.06, _lit(TileType.WATER_GLOSS))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	_draw_reflections(c, m)
 	_draw_reeds(c, m)
 	if _flashing(DvorikSave.VIEW_REEDS):
-		draw_set_transform(pc, 0.0, Vector2(sx, sy))
-		draw_circle(Vector2.ZERO, rad * 1.05, _sheen(_flash_a(0.55)))
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+		var glow_x0 := body.position.x - (m * 0.03 if open_w else 0.0)
+		var glow_x1 := body.end.x + (m * 0.03 if open_e else 0.0)
+		var glow_y0 := body.position.y - (m * 0.03 if open_n else 0.0)
+		var glow_y1 := body.end.y + (m * 0.03 if open_s else 0.0)
+		var glow := Rect2(Vector2(glow_x0, glow_y0), Vector2(glow_x1 - glow_x0, glow_y1 - glow_y0))
+		TileArt.round_rect_sel(self, glow, _sheen(_flash_a(0.5)), rad * 1.05, rtl, rtr, rbl, rbr)
 
 
 func _draw_reflections(c: Vector2, m: float) -> void:
-	# house+water: тёмный силуэт крыши на воде, не зеркало.
+	# house+water: силуэт плиты крыши на масле.
 	var col := _lit(TileType.REFLECTION)
 	if edge_n == TileType.HOUSE:
 		_roof_silhouette(Vector2(c.x, m * 0.18), m, col)
@@ -523,21 +530,21 @@ func _draw_reflections(c: Vector2, m: float) -> void:
 
 
 func _roof_silhouette(p: Vector2, m: float, col: Color) -> void:
-	var hw := m * 0.16
-	var hh := m * 0.11
+	var hw := m * 0.18
+	var hh := m * 0.08
 	draw_colored_polygon(
 		PackedVector2Array([
-			Vector2(p.x - hw, p.y + hh * 0.35),
-			Vector2(p.x, p.y - hh),
-			Vector2(p.x + hw, p.y + hh * 0.35),
+			Vector2(p.x - hw, p.y + hh * 0.4),
+			Vector2(p.x - hw * 0.85, p.y - hh),
+			Vector2(p.x + hw * 0.85, p.y - hh),
+			Vector2(p.x + hw, p.y + hh * 0.4),
 		]),
 		col
 	)
-	draw_rect(Rect2(p.x - hw * 0.55, p.y + hh * 0.25, hw * 1.1, hh * 0.55), col)
 
 
 func _draw_reeds(c: Vector2, m: float) -> void:
-	# water+tree: два прутика у края лужи.
+	# water+tree: два прутика у края чаши.
 	if edge_n == TileType.TREE:
 		_reeds_at(Vector2(c.x, m * 0.08), Vector2(0, -1), m)
 	if edge_s == TileType.TREE:

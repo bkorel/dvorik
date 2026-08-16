@@ -95,55 +95,98 @@ func _finish_press(pos: Vector2) -> void:
 func _draw() -> void:
 	if size.x <= 0.0:
 		return
-	# Та же оливковая древесина, что у стола.
-	draw_rect(Rect2(Vector2.ZERO, size), TileType.TABLE_EDGE)
-	draw_rect(Rect2(Vector2(6, 6), size - Vector2(12, 12)), TileType.TABLE)
+	_draw_shelf()
 	for i in _btn.size():
-		_draw_button(_btn[i], TYPES[i], TYPES[i] == selected)
+		_draw_toy(_btn[i], TYPES[i], TYPES[i] == selected)
 
 
-func _draw_button(rect: Rect2, tile: int, raised: bool) -> void:
-	var lift := Vector2(0.0, -rect.size.y * 0.10) if raised else Vector2.ZERO
-	var r := Rect2(rect.position + lift, rect.size)
+func _draw_shelf() -> void:
+	# Сплошной каменный карниз — игрушки просто стоят на нём, без рамок-иконок.
+	draw_rect(Rect2(Vector2.ZERO, size), TileType.TABLE_EDGE)
+	var shelf := Rect2(Vector2(4, 4), size - Vector2(8, 8))
+	draw_rect(shelf, TileType.TABLE)
+	var lip_h := size.y * 0.16
+	draw_rect(Rect2(shelf.position.x, shelf.position.y, shelf.size.x, lip_h), TileType.STONE_LIGHT)
+	draw_line(Vector2(shelf.position.x, shelf.position.y + 1.0), Vector2(shelf.end.x, shelf.position.y + 1.0), Color(0.62, 0.64, 0.67, 0.35), 1.4)
+	draw_line(Vector2(shelf.position.x, shelf.position.y + lip_h), Vector2(shelf.end.x, shelf.position.y + lip_h), TileType.STONE_DARK, 2.0)
+	TileArt.stone_grain(self, shelf, 3, 9, 0.7)
+
+
+func _draw_toy(rect: Rect2, tile: int, raised: bool) -> void:
+	# Выбранный камень заметно крупнее, поднят высоко над карнизом; тень
+	# остаётся у основания — виден явный отрыв, не смена цвета кнопки.
+	var scale_bump := 1.16 if raised else 1.0
+	var lift := rect.size.y * 0.42 if raised else 0.0
+	var base_size := rect.size * scale_bump
+	var r := Rect2(rect.get_center() - base_size * 0.5 - Vector2(0.0, lift), base_size)
 	var m := minf(r.size.x, r.size.y)
-	# Выемка-кнопка; выбранная — приподнята.
-	draw_rect(Rect2(r.position + Vector2(m * 0.04, m * 0.06), r.size), TileType.SHADOW)
-	draw_rect(r, TileType.TABLE_RIDGE if raised else TileType.TABLE_RECESS)
-	var well := r.grow(-m * 0.08)
-	draw_rect(well, TileType.TABLE if raised else TileType.TABLE_RECESS)
-	var inner := r.grow(-r.size.x * 0.16)
+	# Тень всегда у основания слота: у поднятого камня — маленькая и далеко
+	# под ним (виден отрыв), у стоящего — широкая и прямо под ним.
+	var shadow_y := rect.end.y - rect.size.y * 0.05
+	var shadow_w := m * (0.24 if raised else 0.46)
+	draw_set_transform(Vector2(rect.get_center().x, shadow_y), 0.0, Vector2(1.0, 0.34))
+	draw_circle(Vector2.ZERO, shadow_w, Color(0.02, 0.02, 0.03, 0.55 if raised else 0.28))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var inner := r.grow(-r.size.x * 0.10)
 	match tile:
 		TileType.HOUSE:
-			var body := Rect2(inner.position.x, inner.position.y + inner.size.y * 0.22, inner.size.x, inner.size.y * 0.62)
-			draw_rect(Rect2(body.position + Vector2(2, 3), body.size), TileType.SHADOW)
-			draw_rect(body, TileType.WOOD_PALE)
-			var mid := inner.get_center()
-			draw_colored_polygon(
-				PackedVector2Array([
-					Vector2(inner.position.x + 2.0, inner.position.y + inner.size.y * 0.32),
-					Vector2(mid.x, inner.position.y + 2.0),
-					Vector2(inner.end.x - 2.0, inner.position.y + inner.size.y * 0.32),
-				]),
-				TileType.WOOD_ROOF
-			)
+			_toy_house(inner, m)
 		TileType.ROAD:
-			var pad := inner.size.y * 0.30
-			var plank := Rect2(inner.position.x, inner.position.y + pad, inner.size.x, inner.size.y - pad * 2.0)
-			draw_rect(Rect2(plank.position + Vector2(2, 3), plank.size), TileType.SHADOW)
-			draw_rect(plank, TileType.ROAD_COL)
-			var y1 := plank.position.y + plank.size.y * 0.35
-			draw_line(Vector2(plank.position.x, y1), Vector2(plank.end.x, y1), TileType.ROAD_GROOVE, 1.5)
+			_toy_road(inner, m)
 		TileType.TREE:
-			var c := inner.get_center()
-			var tm := minf(inner.size.x, inner.size.y)
-			draw_circle(c + Vector2(tm * 0.04, tm * 0.06), tm * 0.10, TileType.SHADOW)
-			draw_rect(Rect2(c.x - tm * 0.06, c.y, tm * 0.12, tm * 0.24), TileType.TREE_TRUNK)
-			draw_circle(c + Vector2(0.0, -tm * 0.08), tm * 0.24, TileType.TREE_CROWN)
-			draw_circle(c + Vector2(-tm * 0.08, -tm * 0.14), tm * 0.08, TileType.TREE_CROWN_HI)
+			_toy_tree(inner, m)
 		TileType.WATER:
-			var wc := inner.get_center()
-			var wm := minf(inner.size.x, inner.size.y)
-			draw_circle(wc + Vector2(wm * 0.04, wm * 0.05), wm * 0.28, TileType.SHADOW)
-			draw_circle(wc, wm * 0.28, TileType.WATER_RIM)
-			draw_circle(wc, wm * 0.20, TileType.WATER_COL)
-			draw_circle(wc + Vector2(-wm * 0.08, -wm * 0.08), wm * 0.06, TileType.WATER_GLOSS)
+			_toy_water(inner, m)
+
+
+func _toy_house(inner: Rect2, m: float) -> void:
+	# Тот же низкий каменный объём + тёмная плита крыши, что и на доске.
+	var roof_h := inner.size.y * 0.42
+	var wall := Rect2(inner.position.x, inner.position.y + roof_h, inner.size.x, inner.size.y - roof_h)
+	draw_rect(Rect2(wall.position + Vector2(1.5, 2.0), wall.size), TileType.SHADOW)
+	draw_rect(wall, TileType.STONE_MID)
+	var face_h := wall.size.y * 0.34
+	draw_rect(Rect2(wall.position.x, wall.end.y - face_h, wall.size.x, face_h), TileType.STONE_FACE)
+	draw_line(Vector2(wall.position.x, wall.end.y - face_h), Vector2(wall.end.x, wall.end.y - face_h), TileType.STONE_DARK, 1.2)
+	var door_w := m * 0.15
+	draw_rect(Rect2(wall.get_center().x - door_w * 0.5, wall.end.y - face_h * 0.95, door_w, face_h * 0.95), TileType.STONE_DARK)
+	var roof := Rect2(inner.position.x - m * 0.055, inner.position.y, inner.size.x + m * 0.11, roof_h)
+	draw_rect(Rect2(roof.position + Vector2(1.5, 2.0), roof.size), TileType.SHADOW)
+	draw_rect(roof, TileType.ROOF_SLAB)
+	draw_line(Vector2(roof.position.x, roof.position.y + 1.0), Vector2(roof.end.x, roof.position.y + 1.0), TileType.ROOF_SHEEN, 1.4)
+	draw_line(Vector2(roof.position.x, roof.end.y), Vector2(roof.end.x, roof.end.y), TileType.ROOF_EDGE, 2.0)
+	TileArt.stone_grain(self, wall, 41, 42, 0.6)
+
+
+func _toy_road(inner: Rect2, m: float) -> void:
+	# Та же плита с одним швом, что и на доске.
+	var pad_y := inner.size.y * 0.26
+	var plate := Rect2(inner.position.x - m * 0.06, inner.position.y + pad_y, inner.size.x + m * 0.12, inner.size.y - pad_y * 2.0)
+	draw_rect(Rect2(plate.position + Vector2(0.0, 1.5), plate.size), TileType.SHADOW)
+	draw_rect(plate, TileType.ROAD_COL)
+	draw_line(Vector2(plate.position.x + 1.0, plate.get_center().y), Vector2(plate.end.x - 1.0, plate.get_center().y), TileType.ROAD_GROOVE, 2.0)
+	draw_line(Vector2(plate.position.x, plate.position.y + 1.0), Vector2(plate.end.x, plate.position.y + 1.0), Color(0.60, 0.61, 0.64, 0.22), 1.2)
+	TileArt.stone_grain(self, plate, 43, 44, 0.6)
+
+
+func _toy_tree(inner: Rect2, m: float) -> void:
+	# Живая тёмная крона — как на доске, без изменений силуэта.
+	var c := inner.get_center()
+	draw_circle(c + Vector2(m * 0.04, m * 0.06), m * 0.10, TileType.SHADOW)
+	draw_rect(Rect2(c.x - m * 0.05, c.y, m * 0.10, m * 0.26), TileType.TREE_TRUNK)
+	draw_circle(c + Vector2(0.0, -m * 0.10), m * 0.25, TileType.TREE_CROWN_LO)
+	draw_circle(c + Vector2(-m * 0.08, -m * 0.13), m * 0.16, TileType.TREE_CROWN)
+	draw_circle(c + Vector2(m * 0.07, -m * 0.15), m * 0.12, TileType.TREE_CROWN_HI)
+
+
+func _toy_water(inner: Rect2, m: float) -> void:
+	# Та же чаша с чёрным маслом и тусклым бликом, что и на доске.
+	var c := inner.get_center()
+	var rad := minf(inner.size.x, inner.size.y) * 0.5
+	draw_circle(c + Vector2(m * 0.04, m * 0.05), rad, TileType.SHADOW)
+	draw_circle(c, rad, TileType.WATER_RIM)
+	draw_circle(c, rad * 0.78, TileType.WATER_DEEP)
+	draw_circle(c, rad * 0.66, TileType.WATER_COL)
+	draw_set_transform(c + Vector2(-rad * 0.28, -rad * 0.30), 0.0, Vector2(1.1, 0.48))
+	draw_circle(Vector2.ZERO, m * 0.055, TileType.WATER_GLOSS)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)

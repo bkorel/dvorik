@@ -338,85 +338,107 @@ func _yard_at(p: Vector2, peg_r: float, bush_r: float) -> void:
 
 
 func _draw_road() -> void:
-	# Лента по рёбрам сетки (iso_hw/hh), не плита-штамп на клетку.
-	# Координаты стыка = те же, что у соседа → шов без щели.
-	var c := iso_c + Vector2(0.0, -iso_th * 0.08)
+	# Сплошная лента. Без ромба в центре и без шапок на рёбрах — это и были штампы.
+	var c := iso_c + Vector2(0.0, -iso_th * 0.06)
 	var shaded := _has_neighbor(TileType.TREE)
 	var col := _lit(TileType.PATH_SHADE if shaded else TileType.ROAD_COL)
 	var lit := _lit(TileType.ROAD_LIT if not shaded else TileType.PATH_SHADE)
 	var groove := _lit(TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE)
-	var depth_col := col.darkened(0.20)
-	var join_n := edge_n == TileType.ROAD
-	var join_e := edge_e == TileType.ROAD
-	var join_s := edge_s == TileType.ROAD
-	var join_w := edge_w == TileType.ROAD
+	var depth_col := col.darkened(0.22)
 	var links: Array[String] = []
-	if join_n:
+	if edge_n == TileType.ROAD:
 		links.append("n")
-	if join_e:
+	if edge_e == TileType.ROAD:
 		links.append("e")
-	if join_s:
+	if edge_s == TileType.ROAD:
 		links.append("s")
-	if join_w:
+	if edge_w == TileType.ROAD:
 		links.append("w")
-	# Геометрия стыка — полный шаг сетки.
 	var ghw := iso_hw
 	var ghh := iso_hh
-	if links.size() >= 2:
-		_road_corner_fill(c, ghw, ghh, links, col)
-	_poly(Iso.diamond(c, ghw * 0.30, ghh * 0.30), lit)
+	# Ось «в глубину» ромба (к дальнему NE).
+	var depth_dir := Vector2(ghw, -ghh).normalized()
 	if links.is_empty():
+		# Одна лента через клетку вглубь — не квадратная плита.
 		_road_strip(
-			c + Vector2(-ghw * 0.35, ghh * 0.38),
-			c + Vector2(ghw * 0.55, -ghh * 0.48),
-			ghw * 0.20,
+			c - depth_dir * ghw * 0.85,
+			c + depth_dir * ghw * 0.85,
+			ghw * 0.19,
 			depth_col,
 			lit,
-			groove
+			groove,
+			true
 		)
-	else:
-		for e in links:
-			# Ровно середина общего ребра (+ небольшой вылет на перекрытие).
-			var end := Iso.edge_mid(c, ghw, ghh, e)
-			var over := (end - c) * 0.20
-			end = end + over
-			var into_depth := e == "n" or e == "w"
-			_road_strip(
-				c,
-				end,
-				ghw * (0.20 if into_depth else 0.34),
-				depth_col if into_depth else col,
-				lit,
-				groove
-			)
-			# Шапка стыка — оба соседа рисуют одно пятно.
-			_poly(Iso.diamond(Iso.edge_mid(c, ghw, ghh, e), ghw * 0.28, ghh * 0.28), depth_col if into_depth else col)
+		_draw_puddles(c, ghw * 0.9, ghh * 0.9)
+		if _flashing(DvorikSave.VIEW_PATH) and shaded:
+			_road_strip(c - depth_dir * ghw * 0.5, c + depth_dir * ghw * 0.5, ghw * 0.22, _sheen(_flash_a(0.45)), lit, groove, true)
+		return
+	# Рукава: от противоположного края клетки через центр далеко в соседа (~½ шага за mid).
+	for e in links:
+		var mid := Iso.edge_mid(c, ghw, ghh, e)
+		var into_nb := c + (mid - c) * 2.0 # центр соседней клетки
+		var end := mid.lerp(into_nb, 0.55) # глубоко на половину шага в соседа
+		var back := c - (mid - c) * 0.95 # назад через свою клетку
+		var into_depth := e == "n" or e == "w"
+		var half_w := ghw * (0.17 if into_depth else 0.30)
+		var strip_col := depth_col if into_depth else col
+		_road_strip(back, end, half_w, strip_col, lit, groove, into_depth)
+	# Поворот: цельный L-полигон (не два обрубка).
+	if links.size() >= 2:
+		_road_corner_fill(c, ghw, ghh, links, col, depth_col)
 	_draw_puddles(c, ghw * 0.9, ghh * 0.9)
 	if _flashing(DvorikSave.VIEW_PATH) and shaded:
-		_poly(Iso.diamond(c, ghw * 0.32, ghh * 0.32), _sheen(_flash_a(0.55)))
+		_road_strip(c - depth_dir * ghw * 0.35, c + depth_dir * ghw * 0.35, ghw * 0.24, _sheen(_flash_a(0.45)), lit, groove, true)
 
 
-func _road_corner_fill(c: Vector2, hw: float, hh: float, links: Array[String], col: Color) -> void:
-	# Для каждой пары рукавов — треугольник центр–край–край (L без разрыва).
+func _road_corner_fill(c: Vector2, hw: float, hh: float, links: Array[String], col: Color, depth_col: Color) -> void:
+	# Сплошной L: внешний контур из двух рукавов с толщиной.
 	for i in links.size():
 		for j in range(i + 1, links.size()):
-			var a := Iso.edge_mid(c, hw, hh, links[i])
-			var b := Iso.edge_mid(c, hw, hh, links[j])
-			_poly(PackedVector2Array([c, a, b]), col)
+			var ea: String = links[i]
+			var eb: String = links[j]
+			var mid_a := Iso.edge_mid(c, hw, hh, ea)
+			var mid_b := Iso.edge_mid(c, hw, hh, eb)
+			var end_a := c + (mid_a - c) * 2.0
+			var end_b := c + (mid_b - c) * 2.0
+			end_a = mid_a.lerp(end_a, 0.55)
+			end_b = mid_b.lerp(end_b, 0.55)
+			var da := end_a - c
+			var db := end_b - c
+			if da.length_squared() < 0.01 or db.length_squared() < 0.01:
+				continue
+			var depth_a := ea == "n" or ea == "w"
+			var depth_b := eb == "n" or eb == "w"
+			var wa := hw * (0.17 if depth_a else 0.30)
+			var wb := hw * (0.17 if depth_b else 0.30)
+			var na := Vector2(-da.y, da.x).normalized() * wa
+			var nb := Vector2(-db.y, db.x).normalized() * wb
+			na = Vector2(na.x, na.y * 0.78)
+			nb = Vector2(nb.x, nb.y * 0.78)
+			# Шестиугольник L: конец A → угол снаружи → конец B → внутрь.
+			var fill := depth_col if (depth_a or depth_b) else col
+			_poly(PackedVector2Array([
+				end_a + na,
+				end_a - na,
+				c - na * 0.15 - nb * 0.15,
+				end_b - nb,
+				end_b + nb,
+				c + na * 0.35 + nb * 0.35,
+			]), fill)
 
 
-func _road_strip(a: Vector2, b: Vector2, half_w: float, col: Color, lit: Color, groove: Color) -> void:
+func _road_strip(a: Vector2, b: Vector2, half_w: float, col: Color, lit: Color, groove: Color, into_depth: bool = false) -> void:
 	var d := b - a
 	if d.length_squared() < 0.01:
 		return
 	var n := Vector2(-d.y, d.x).normalized() * half_w
-	# Чуть сплющить по Y, чтобы полоса лежала на ромбе.
-	n = Vector2(n.x, n.y * 0.72)
+	# Вглубь сильнее сплющиваем по экрану Y — лента уходит в ромб, не горизонтальный брус.
+	var squash := 0.55 if into_depth else 0.82
+	n = Vector2(n.x, n.y * squash)
 	var pts := PackedVector2Array([a + n, b + n, b - n, a - n])
 	_poly(pts, col)
-	# Светлая кромка «в глубину».
-	draw_line(a + n * 0.35, b + n * 0.35, lit, 1.4)
-	draw_line(a, b, groove, 1.1)
+	draw_line(a + n * 0.4, b + n * 0.4, lit, 1.6 if into_depth else 2.0)
+	draw_line(a, b, groove, 1.0 if into_depth else 1.3)
 
 
 func _draw_puddles(c: Vector2, hw: float, hh: float) -> void:

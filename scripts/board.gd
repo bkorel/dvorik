@@ -96,7 +96,7 @@ func _relayout() -> void:
 		cell.queue_redraw()
 	_update_pond_props()
 	if _walkers != null:
-		_walkers.z_index = 400
+		# Люди depth-sortятся сами (как клетки), не общим z поверх домов.
 		_walkers.queue_redraw()
 	queue_redraw()
 
@@ -375,43 +375,112 @@ func _update_pond_props() -> void:
 		duck_cell.queue_redraw()
 
 
+func tile_at(gp: Vector2i) -> int:
+	if not _in_bounds(gp):
+		return TileType.EMPTY
+	return _cell_at(gp).tile
+
+
+func is_pond_water(gp: Vector2i) -> bool:
+	# Вода, у которой есть ортогональный сосед-вода (пруд, не лужа).
+	if tile_at(gp) != TileType.WATER:
+		return false
+	for d in ORTHO:
+		if tile_at(gp + d) == TileType.WATER:
+			return true
+	return false
+
+
+func is_grove_tree(gp: Vector2i) -> bool:
+	if tile_at(gp) != TileType.TREE:
+		return false
+	for d in ORTHO:
+		if tile_at(gp + d) == TileType.TREE:
+			return true
+	return false
+
+
+func _add_walkable(out: Array, gp: Vector2i) -> void:
+	if not _in_bounds(gp):
+		return
+	var t := tile_at(gp)
+	# Не на дом и не на ствол — только обход/край.
+	if t == TileType.HOUSE or t == TileType.TREE:
+		return
+	if gp not in out:
+		out.append(gp)
+
+
 func walkable_cells() -> Array:
-	# Дорога или клетка ортогонально у дома. В дома не заходят.
-	var roads := false
+	# Дороги + вдоль домов + края пруда/рощи. Никогда клетка HOUSE.
 	var out: Array = []
 	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
 		if cell.tile == TileType.ROAD:
-			roads = true
-			out.append(Vector2i(cell.grid_x, cell.grid_y))
-	if roads:
-		for cell in _cells:
-			if cell.tile != TileType.EMPTY:
-				continue
+			_add_walkable(out, gp)
+		elif cell.tile == TileType.EMPTY:
 			if cell.edge_n == TileType.HOUSE or cell.edge_e == TileType.HOUSE \
 					or cell.edge_s == TileType.HOUSE or cell.edge_w == TileType.HOUSE:
-				var gp := Vector2i(cell.grid_x, cell.grid_y)
-				if gp not in out:
-					out.append(gp)
+				_add_walkable(out, gp)
+	# Край пруда: сама вода-с-соседом или ортогональный сосед.
+	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
+		if not is_pond_water(gp):
+			continue
+		_add_walkable(out, gp)
+		for d in ORTHO:
+			_add_walkable(out, gp + d)
+	# Роща: стоять рядом с деревом, у которого есть сосед-дерево.
+	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
+		if not is_grove_tree(gp):
+			continue
+		for d in ORTHO:
+			_add_walkable(out, gp + d)
+	if not out.is_empty():
 		return out
-	# Нет дорог — толкутся у стартового дома (не на клетке дома).
-	var near: Array = []
+	# Только стартовый дом — толкутся у (3,3), не на нём.
 	for d in ORTHO:
-		var n: Vector2i = START_HOUSE + d
-		if _in_bounds(n) and _cell_at(n).tile != TileType.HOUSE:
-			near.append(n)
-	for d2 in [Vector2i(1, 1), Vector2i(1, -1), Vector2i(-1, 1), Vector2i(-1, -1)]:
-		var n2: Vector2i = START_HOUSE + d2
-		if _in_bounds(n2) and _cell_at(n2).tile != TileType.HOUSE:
-			near.append(n2)
-	if near.is_empty():
-		# Любая пустая рядом по Манхэттену.
-		for cell in _cells:
-			if cell.tile == TileType.HOUSE:
-				continue
-			var gp := Vector2i(cell.grid_x, cell.grid_y)
-			if absi(gp.x - START_HOUSE.x) + absi(gp.y - START_HOUSE.y) <= 2:
-				near.append(gp)
-	return near
+		_add_walkable(out, START_HOUSE + d)
+	return out
+
+
+func points_of_interest() -> Array:
+	# [{ "kind": String, "gp": Vector2i }, ...] — только то, что уже на поле.
+	var pois: Array = []
+	var seen: Dictionary = {}
+	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
+		if cell.tile == TileType.HOUSE:
+			for d in ORTHO:
+				_poi_add(pois, seen, "HOUSE", gp + d)
+		elif cell.tile == TileType.ROAD:
+			_poi_add(pois, seen, "ROAD", gp)
+		elif is_pond_water(gp):
+			_poi_add(pois, seen, "POND", gp)
+			for d in ORTHO:
+				_poi_add(pois, seen, "POND", gp + d)
+		elif is_grove_tree(gp):
+			for d in ORTHO:
+				var n: Vector2i = gp + d
+				if _in_bounds(n) and tile_at(n) != TileType.TREE:
+					_poi_add(pois, seen, "GROVE", n)
+	if pois.is_empty():
+		for d in ORTHO:
+			_poi_add(pois, seen, "HOUSE", START_HOUSE + d)
+	return pois
+
+
+func _poi_add(pois: Array, seen: Dictionary, kind: String, gp: Vector2i) -> void:
+	if not _in_bounds(gp):
+		return
+	if tile_at(gp) == TileType.HOUSE:
+		return
+	var key := "%s:%d,%d" % [kind, gp.x, gp.y]
+	if seen.has(key):
+		return
+	seen[key] = true
+	pois.append({"kind": kind, "gp": gp})
 
 
 func _load() -> void:

@@ -10,19 +10,36 @@ const ORTHO: Array[Vector2i] = [
 	Vector2i(-1, 0),
 ]
 
+const TAP_MAX_MS := 400
+const TAP_MAX_MOVE := 24.0
+
 var _cells: Array[Cell] = []
 var _found: Array = []
 var _knock: AudioStreamPlayer
+var _walkers: Walkers
+
+var iso_hw: float = 28.0
+var iso_hh: float = 14.0
+var iso_th: float = 10.0
+var iso_origin: Vector2 = Vector2.ZERO
+
+var _pressing: bool = false
+var _press_pos: Vector2 = Vector2.ZERO
+var _press_ms: int = 0
+var _last_tap_ms: int = 0
 
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mouse_filter = Control.MOUSE_FILTER_STOP
 	_knock = AudioStreamPlayer.new()
 	_knock.stream = DvorikKnock.make_stream()
 	_knock.volume_db = -6.0
 	add_child(_knock)
 	_build()
+	_walkers = Walkers.new()
+	add_child(_walkers)
 	_load()
+	_walkers.setup(self)
 	resized.connect(_relayout)
 	_relayout()
 
@@ -39,45 +56,200 @@ func _build() -> void:
 
 
 func _relayout() -> void:
-	var side := minf(size.x, size.y)
-	var cell_s := side / float(GRID)
-	var ox := (size.x - side) * 0.5
-	var oy := (size.y - side) * 0.5
+	if size.x <= 1.0 or size.y <= 1.0:
+		return
+	# Весь 8×8 на одном экране, без скролла.
+	var pad := minf(size.x, size.y) * 0.04
+	var usable_w := size.x - pad * 2.0
+	var usable_h := size.y - pad * 2.0
+	# Ширина поля ≈ (GRID-1)*2*hw? span x = (GRID-1)*hw*2 для углов (0,G-1) и (G-1,0)
+	# x range: -(G-1)*hw .. +(G-1)*hw → 2*(G-1)*hw
+	# y range: 0 .. 2*(G-1)*hh плюс толщина и крыши
+	var span_cells := float(GRID - 1)
+	var roof_room := usable_h * 0.10
+	var th_room := usable_h * 0.06
+	var hw_by_w := usable_w / (2.0 * span_cells)
+	var hh_by_h := (usable_h - roof_room - th_room) / (2.0 * span_cells)
+	iso_hw = minf(hw_by_w, hh_by_h * 2.05)
+	iso_hh = iso_hw * 0.50
+	iso_th = iso_hw * 0.32
+	var field_w := 2.0 * span_cells * iso_hw
+	var field_h := 2.0 * span_cells * iso_hh
+	iso_origin = Vector2(
+		size.x * 0.5,
+		pad + roof_room + (usable_h - roof_room - th_room - field_h) * 0.35
+	)
+	var cell_w := iso_hw * 2.4
+	var cell_h := iso_hh * 2.4 + iso_th * 3.8 + iso_hw * 0.9
 	for cell in _cells:
-		cell.size = Vector2(cell_s, cell_s)
+		var local_c := Iso.grid_to_screen(cell.grid_x, cell.grid_y, iso_hw, iso_hh)
+		var top_left := iso_origin + local_c - Vector2(cell_w * 0.5, cell_h * 0.42)
+		cell.size = Vector2(cell_w, cell_h)
 		cell.pivot_offset = cell.size * 0.5
-		cell.sync_home(Vector2(ox + float(cell.grid_x) * cell_s, oy + float(cell.grid_y) * cell_s))
+		cell.iso_hw = iso_hw
+		cell.iso_hh = iso_hh
+		cell.iso_th = iso_th
+		cell.iso_c = Vector2(cell_w * 0.5, cell_h * 0.42)
+		# Фишки выше всей земли (земля на Board._draw).
+		cell.z_index = 100 + Iso.depth_key(cell.grid_x, cell.grid_y)
+		cell.sync_home(top_left)
 		cell.queue_redraw()
+	_update_pond_props()
+	if _walkers != null:
+		# Люди depth-sortятся сами (как клетки), не общим z поверх домов.
+		_walkers.queue_redraw()
 	queue_redraw()
 
 
+func grid_to_board_pos(gx: float, gy: float) -> Vector2:
+	return iso_origin + Iso.grid_to_screen(gx, gy, iso_hw, iso_hh)
+
+
 func _draw() -> void:
-	# Рама стола вокруг сетки — тёплое оливковое дерево.
 	if size.x <= 0.0 or size.y <= 0.0:
 		return
-	var side := minf(size.x, size.y)
-	var ox := (size.x - side) * 0.5
-	var oy := (size.y - side) * 0.5
-	var frame := Rect2(Vector2(ox, oy), Vector2(side, side)).grow(side * 0.018)
-	draw_rect(frame, TileType.TABLE_EDGE)
-	draw_rect(frame.grow(-side * 0.008), TileType.TABLE)
-	# Горизонтальное волокно стола.
+	var top := TileType.SKY_TOP
+	var bot := TileType.SKY_BOT
+	for i in 8:
+		var t := float(i) / 7.0
+		var y0 := size.y * t
+		var y1 := size.y * (float(i + 1) / 7.0)
+		draw_rect(Rect2(0.0, y0, size.x, y1 - y0 + 1.0), top.lerp(bot, t))
+	# Земля целиком под фишками — иначе соседняя трава ест стены/стыки дорог.
+	if iso_hw <= 0.0:
+		return
+	var ordered: Array[Cell] = _cells.duplicate()
+	ordered.sort_custom(func(a: Cell, b: Cell) -> bool:
+		return Iso.depth_key(a.grid_x, a.grid_y) < Iso.depth_key(b.grid_x, b.grid_y)
+	)
+	for cell in ordered:
+		_draw_earth_cell(cell)
+
+
+func _draw_earth_cell(cell: Cell) -> void:
+	var c := grid_to_board_pos(cell.grid_x, cell.grid_y)
+	var hw := iso_hw * 1.02
+	var hh := iso_hh * 1.02
+	var th := iso_th
+	var top := Iso.diamond(c, hw, hh)
+	var bot := Iso.diamond(c + Vector2(0.0, th), hw, hh)
+	_earth_poly(PackedVector2Array([top[3], top[2], bot[2], bot[3]]), TileType.EARTH_LEFT)
+	_earth_poly(PackedVector2Array([top[2], top[1], bot[1], bot[2]]), TileType.EARTH_RIGHT)
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 11
-	for i in 14:
-		var y := frame.position.y + rng.randf() * frame.size.y
-		var a := Color(TileType.TABLE_GRAIN.r, TileType.TABLE_GRAIN.g, TileType.TABLE_GRAIN.b, 0.35)
-		draw_line(
-			Vector2(frame.position.x + 2.0, y),
-			Vector2(frame.end.x - 2.0, y + rng.randf_range(-1.5, 1.5)),
-			a,
-			1.2
-		)
+	rng.seed = cell.grid_x * 17 + cell.grid_y * 31 + 4
+	var top_col := TileType.EARTH_TOP.lerp(TileType.EARTH_TOP_ALT, rng.randf() * 0.35)
+	_earth_poly(top, top_col)
+	for i in 2:
+		var t := rng.randf_range(0.2, 0.8)
+		var u := rng.randf_range(0.2, 0.8)
+		var p := top[0] * (1.0 - t) * (1.0 - u) + top[1] * t * (1.0 - u) + top[2] * t * u + top[3] * (1.0 - t) * u
+		draw_line(p, p + Vector2(rng.randf_range(-1.2, 1.2), -rng.randf_range(1.8, 3.8)), TileType.EARTH_EDGE, 1.0)
+
+
+func _earth_poly(pts: PackedVector2Array, col: Color) -> void:
+	if pts.size() < 3:
+		return
+	if pts.size() == 4:
+		draw_colored_polygon(PackedVector2Array([pts[0], pts[1], pts[2]]), col)
+		draw_colored_polygon(PackedVector2Array([pts[0], pts[2], pts[3]]), col)
+		return
+	draw_colored_polygon(pts, col)
 
 
 func bind_palette(palette: Palette) -> void:
-	# тап клетки ставит то, что сейчас в руке
 	set_meta("palette", palette)
+
+
+func _gui_input(event: InputEvent) -> void:
+	# Один палец. Свайп / пинч / долгий тап — игнор.
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.index != 0:
+			_pressing = false
+			return
+		if st.pressed:
+			_begin_press(st.position)
+		elif _pressing:
+			_finish_press(st.position)
+	elif event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		if sd.index != 0:
+			_pressing = false
+			return
+		if _pressing and sd.position.distance_to(_press_pos) > TAP_MAX_MOVE:
+			_pressing = false
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if mb.pressed:
+			_begin_press(mb.position)
+		elif _pressing:
+			_finish_press(mb.position)
+	elif event is InputEventMouseMotion:
+		var mm := event as InputEventMouseMotion
+		if _pressing and mm.position.distance_to(_press_pos) > TAP_MAX_MOVE:
+			_pressing = false
+
+
+func _begin_press(pos: Vector2) -> void:
+	_pressing = true
+	_press_pos = pos
+	_press_ms = Time.get_ticks_msec()
+
+
+func _finish_press(pos: Vector2) -> void:
+	_pressing = false
+	if Time.get_ticks_msec() - _press_ms > TAP_MAX_MS:
+		return
+	if pos.distance_to(_press_pos) > TAP_MAX_MOVE:
+		return
+	if Time.get_ticks_msec() - _last_tap_ms < 80:
+		return
+	_last_tap_ms = Time.get_ticks_msec()
+	var gp := _pick_cell(pos)
+	if gp.x < 0:
+		return
+	_on_cell_tapped(_cell_at(gp))
+
+
+func _pick_cell(local_pos: Vector2) -> Vector2i:
+	# Обратная изометрия + проверка ромба верхней грани.
+	var g := Iso.screen_to_grid(local_pos - iso_origin, iso_hw, iso_hh)
+	var candidates: Array[Vector2i] = []
+	var base := Vector2i(roundi(g.x), roundi(g.y))
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var gp := base + Vector2i(dx, dy)
+			if _in_bounds(gp) and _point_in_cell(local_pos, gp):
+				candidates.append(gp)
+	if candidates.is_empty():
+		# Мягкий fallback по ближайшему центру.
+		var best := Vector2i(-1, -1)
+		var best_d := 1e12
+		for cell in _cells:
+			var c := grid_to_board_pos(cell.grid_x, cell.grid_y)
+			var d := local_pos.distance_squared_to(c)
+			if d < best_d:
+				best_d = d
+				best = Vector2i(cell.grid_x, cell.grid_y)
+		if best.x >= 0 and local_pos.distance_to(grid_to_board_pos(best.x, best.y)) < iso_hw * 1.35:
+			return best
+		return Vector2i(-1, -1)
+	# Ближе к камере (больше gx+gy) побеждает при перекрытии.
+	candidates.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return Iso.depth_key(a.x, a.y) > Iso.depth_key(b.x, b.y)
+	)
+	return candidates[0]
+
+
+func _point_in_cell(local_pos: Vector2, gp: Vector2i) -> bool:
+	var c := grid_to_board_pos(gp.x, gp.y)
+	var p := local_pos - c
+	# Ромб: |x|/hw + |y|/hh <= 1, плюс немного вниз на толщину/домик.
+	var in_top := absf(p.x) / iso_hw + absf(p.y) / iso_hh <= 1.12
+	var in_vol := absf(p.x) / iso_hw + absf(p.y - iso_th * 0.5) / (iso_hh + iso_th) <= 1.25
+	return in_top or (p.y > 0.0 and in_vol)
 
 
 func _on_cell_tapped(cell: Cell) -> void:
@@ -90,7 +262,6 @@ func _on_cell_tapped(cell: Cell) -> void:
 func try_place(x: int, y: int, tile: int) -> void:
 	var gp := Vector2i(x, y)
 	var cell := _cell_at(gp)
-	# тот же тип — тычок без смены вида, сейв не трогаем
 	if cell.tile == tile:
 		cell.poke()
 		return
@@ -104,11 +275,13 @@ func try_place(x: int, y: int, tile: int) -> void:
 	_play_knock()
 	_refresh_edges(gp)
 	_maybe_discover_views()
+	_update_pond_props()
+	if _walkers != null:
+		_walkers.refresh_walkable()
 	_save()
 
 
 func _relay_neighbors(gp: Vector2i) -> void:
-	# Соседи слегка сдвигаются от переложенной фишки и щёлкают на место.
 	for d in ORTHO:
 		var n: Vector2i = gp + d
 		if not _in_bounds(n):
@@ -136,7 +309,6 @@ func _refresh_edges(gp: Vector2i) -> void:
 
 func _update_joins(gp: Vector2i) -> void:
 	var cell := _cell_at(gp)
-	# На каждом ортогональном ребре — тип соседа. Клетка не меняет свой тип.
 	cell.edge_n = _neighbor_tile(gp + Vector2i(0, -1))
 	cell.edge_e = _neighbor_tile(gp + Vector2i(1, 0))
 	cell.edge_s = _neighbor_tile(gp + Vector2i(0, 1))
@@ -151,7 +323,6 @@ func _neighbor_tile(gp: Vector2i) -> int:
 
 
 func _maybe_discover_views() -> void:
-	# Любой новый id вида — одна лаковая вспышка на затронутых фишках (обе стороны пары).
 	var fresh: Array = []
 	var flash_map: Dictionary = {}
 	for cell in _cells:
@@ -180,6 +351,142 @@ func _maybe_discover_views() -> void:
 		c.start_flash(entry["views"])
 
 
+func _update_pond_props() -> void:
+	var waters: Array[Cell] = []
+	for cell in _cells:
+		cell.show_lily = false
+		cell.show_duck = false
+		if cell.tile == TileType.WATER:
+			waters.append(cell)
+	if waters.is_empty():
+		return
+	# Одна кувшинка на пруд (первая вода).
+	waters[0].show_lily = true
+	waters[0].queue_redraw()
+	# Утка — когда воды ≥ 2, на клетке с соседом-водой (или второй).
+	if waters.size() >= 2:
+		var duck_cell: Cell = waters[1]
+		for w in waters:
+			if w.edge_n == TileType.WATER or w.edge_e == TileType.WATER \
+					or w.edge_s == TileType.WATER or w.edge_w == TileType.WATER:
+				duck_cell = w
+				break
+		duck_cell.show_duck = true
+		duck_cell.queue_redraw()
+
+
+func tile_at(gp: Vector2i) -> int:
+	if not _in_bounds(gp):
+		return TileType.EMPTY
+	return _cell_at(gp).tile
+
+
+func is_pond_water(gp: Vector2i) -> bool:
+	# Вода, у которой есть ортогональный сосед-вода (пруд, не лужа).
+	if tile_at(gp) != TileType.WATER:
+		return false
+	for d in ORTHO:
+		if tile_at(gp + d) == TileType.WATER:
+			return true
+	return false
+
+
+func is_grove_tree(gp: Vector2i) -> bool:
+	if tile_at(gp) != TileType.TREE:
+		return false
+	for d in ORTHO:
+		if tile_at(gp + d) == TileType.TREE:
+			return true
+	return false
+
+
+func _add_walkable(out: Array, gp: Vector2i) -> void:
+	if not _in_bounds(gp):
+		return
+	var t := tile_at(gp)
+	# Не на дом и не на ствол — только обход/край.
+	if t == TileType.HOUSE or t == TileType.TREE:
+		return
+	if gp not in out:
+		out.append(gp)
+
+
+func walkable_cells() -> Array:
+	# Всё EMPTY-трава + ROAD + край пруда. Один связный граф двора.
+	# Никогда HOUSE, никогда TREE.
+	var out: Array = []
+	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
+		var t := cell.tile
+		if t == TileType.HOUSE or t == TileType.TREE:
+			continue
+		if t == TileType.EMPTY or t == TileType.ROAD:
+			_add_walkable(out, gp)
+		elif t == TileType.WATER and is_pond_water(gp):
+			_add_walkable(out, gp)
+	if out.is_empty():
+		for d in ORTHO:
+			_add_walkable(out, START_HOUSE + d)
+	return out
+
+
+func points_of_interest() -> Array:
+	# [{ "kind": String, "gp": Vector2i }, ...] — только то, что уже на поле.
+	var pois: Array = []
+	var seen: Dictionary = {}
+	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
+		if cell.tile == TileType.HOUSE:
+			for d in ORTHO:
+				_poi_add(pois, seen, "HOUSE", gp + d)
+		elif cell.tile == TileType.ROAD:
+			_poi_add(pois, seen, "ROAD", gp)
+		elif is_pond_water(gp):
+			# Край: сама вода пруда или трава/дорога рядом (не дерево/дом).
+			_poi_add(pois, seen, "POND", gp)
+			for d in ORTHO:
+				var n: Vector2i = gp + d
+				if not _in_bounds(n):
+					continue
+				var nt := tile_at(n)
+				if nt == TileType.HOUSE or nt == TileType.TREE:
+					continue
+				_poi_add(pois, seen, "POND", n)
+		elif is_grove_tree(gp):
+			for d in ORTHO:
+				var n2: Vector2i = gp + d
+				if not _in_bounds(n2):
+					continue
+				var nt2 := tile_at(n2)
+				if nt2 == TileType.HOUSE or nt2 == TileType.TREE:
+					continue
+				_poi_add(pois, seen, "GROVE", n2)
+	if pois.is_empty():
+		for d in ORTHO:
+			_poi_add(pois, seen, "HOUSE", START_HOUSE + d)
+	return pois
+
+
+func field_has_pond_or_grove() -> bool:
+	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
+		if is_pond_water(gp) or is_grove_tree(gp):
+			return true
+	return false
+
+
+func _poi_add(pois: Array, seen: Dictionary, kind: String, gp: Vector2i) -> void:
+	if not _in_bounds(gp):
+		return
+	if tile_at(gp) == TileType.HOUSE:
+		return
+	var key := "%s:%d,%d" % [kind, gp.x, gp.y]
+	if seen.has(key):
+		return
+	seen[key] = true
+	pois.append({"kind": kind, "gp": gp})
+
+
 func _load() -> void:
 	var data := DvorikSave.load_or_default()
 	var grid: Array = data["grid"]
@@ -193,6 +500,7 @@ func _load() -> void:
 	for y in GRID:
 		for x in GRID:
 			_update_joins(Vector2i(x, y))
+	_update_pond_props()
 
 
 func _save() -> void:

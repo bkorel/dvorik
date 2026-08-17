@@ -412,36 +412,21 @@ func _add_walkable(out: Array, gp: Vector2i) -> void:
 
 
 func walkable_cells() -> Array:
-	# Дороги + вдоль домов + края пруда/рощи. Никогда клетка HOUSE.
+	# Всё EMPTY-трава + ROAD + край пруда. Один связный граф двора.
+	# Никогда HOUSE, никогда TREE.
 	var out: Array = []
 	for cell in _cells:
 		var gp := Vector2i(cell.grid_x, cell.grid_y)
-		if cell.tile == TileType.ROAD:
+		var t := cell.tile
+		if t == TileType.HOUSE or t == TileType.TREE:
+			continue
+		if t == TileType.EMPTY or t == TileType.ROAD:
 			_add_walkable(out, gp)
-		elif cell.tile == TileType.EMPTY:
-			if cell.edge_n == TileType.HOUSE or cell.edge_e == TileType.HOUSE \
-					or cell.edge_s == TileType.HOUSE or cell.edge_w == TileType.HOUSE:
-				_add_walkable(out, gp)
-	# Край пруда: сама вода-с-соседом или ортогональный сосед.
-	for cell in _cells:
-		var gp := Vector2i(cell.grid_x, cell.grid_y)
-		if not is_pond_water(gp):
-			continue
-		_add_walkable(out, gp)
+		elif t == TileType.WATER and is_pond_water(gp):
+			_add_walkable(out, gp)
+	if out.is_empty():
 		for d in ORTHO:
-			_add_walkable(out, gp + d)
-	# Роща: стоять рядом с деревом, у которого есть сосед-дерево.
-	for cell in _cells:
-		var gp := Vector2i(cell.grid_x, cell.grid_y)
-		if not is_grove_tree(gp):
-			continue
-		for d in ORTHO:
-			_add_walkable(out, gp + d)
-	if not out.is_empty():
-		return out
-	# Только стартовый дом — толкутся у (3,3), не на нём.
-	for d in ORTHO:
-		_add_walkable(out, START_HOUSE + d)
+			_add_walkable(out, START_HOUSE + d)
 	return out
 
 
@@ -457,18 +442,37 @@ func points_of_interest() -> Array:
 		elif cell.tile == TileType.ROAD:
 			_poi_add(pois, seen, "ROAD", gp)
 		elif is_pond_water(gp):
+			# Край: сама вода пруда или трава/дорога рядом (не дерево/дом).
 			_poi_add(pois, seen, "POND", gp)
 			for d in ORTHO:
-				_poi_add(pois, seen, "POND", gp + d)
+				var n: Vector2i = gp + d
+				if not _in_bounds(n):
+					continue
+				var nt := tile_at(n)
+				if nt == TileType.HOUSE or nt == TileType.TREE:
+					continue
+				_poi_add(pois, seen, "POND", n)
 		elif is_grove_tree(gp):
 			for d in ORTHO:
-				var n: Vector2i = gp + d
-				if _in_bounds(n) and tile_at(n) != TileType.TREE:
-					_poi_add(pois, seen, "GROVE", n)
+				var n2: Vector2i = gp + d
+				if not _in_bounds(n2):
+					continue
+				var nt2 := tile_at(n2)
+				if nt2 == TileType.HOUSE or nt2 == TileType.TREE:
+					continue
+				_poi_add(pois, seen, "GROVE", n2)
 	if pois.is_empty():
 		for d in ORTHO:
 			_poi_add(pois, seen, "HOUSE", START_HOUSE + d)
 	return pois
+
+
+func field_has_pond_or_grove() -> bool:
+	for cell in _cells:
+		var gp := Vector2i(cell.grid_x, cell.grid_y)
+		if is_pond_water(gp) or is_grove_tree(gp):
+			return true
+	return false
 
 
 func _poi_add(pois: Array, seen: Dictionary, kind: String, gp: Vector2i) -> void:

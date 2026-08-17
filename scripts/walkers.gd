@@ -11,9 +11,10 @@ const CLOTH := [
 	TileType.PERSON_CLOTH_D,
 ]
 
-const PAUSE_MIN := 0.55
-const PAUSE_MAX := 1.35
-const STEP_SPEED := 1.55
+const PAUSE_MIN := 0.40
+const PAUSE_MAX := 0.80
+# ~4 клетки за ~3 с → ~0.75 с/шаг.
+const STEP_SPEED := 1.35
 
 
 class PersonView extends Node2D:
@@ -217,14 +218,21 @@ func _assign_poi(p: Dictionary, spots: Array) -> void:
 		p["from"] = start
 		p["to"] = start
 	var last_kind: String = str(p["last_kind"])
+	var want_away := board.field_has_pond_or_grove()
 	var candidates: Array = []
-	for poi in pois:
-		if str(poi["kind"]) != last_kind and Vector2i(poi["gp"]) != start:
-			candidates.append(poi)
-	if candidates.is_empty():
-		for poi2 in pois:
-			if Vector2i(poi2["gp"]) != start:
-				candidates.append(poi2)
+	if want_away:
+		# Пока на поле есть пруд/роща — не выбирать HOUSE снова.
+		_collect_pois(candidates, pois, start, last_kind, ["POND", "GROVE"], true)
+		if candidates.is_empty():
+			_collect_pois(candidates, pois, start, last_kind, ["POND", "GROVE"], false)
+		if candidates.is_empty():
+			_collect_pois(candidates, pois, start, last_kind, ["ROAD"], true)
+		if candidates.is_empty():
+			_collect_pois(candidates, pois, start, last_kind, ["ROAD"], false)
+	else:
+		_collect_pois(candidates, pois, start, last_kind, ["HOUSE", "ROAD", "POND", "GROVE"], true)
+		if candidates.is_empty():
+			_collect_pois(candidates, pois, start, last_kind, ["HOUSE", "ROAD", "POND", "GROVE"], false)
 	if candidates.is_empty():
 		var opts: Array[Vector2i] = []
 		for d in Board.ORTHO:
@@ -264,8 +272,37 @@ func _assign_poi(p: Dictionary, spots: Array) -> void:
 		p["t"] = 0.0
 		p["last_kind"] = str(poi3["kind"])
 		return
+	# Не залипать у дома: короткий шаг к любому walkable, затем снова POI.
+	var step_opts: Array[Vector2i] = []
+	for d2 in Board.ORTHO:
+		var n2: Vector2i = start + d2
+		if _is_walkable(n2, spots) and board.tile_at(n2) != TileType.HOUSE:
+			step_opts.append(n2)
+	if not step_opts.is_empty():
+		var step: Vector2i = step_opts[_rng.randi() % step_opts.size()]
+		p["path"] = [step]
+		p["path_i"] = 0
+		p["from"] = start
+		p["to"] = step
+		p["t"] = 0.0
+		return
 	p["path"] = []
 	p["pause"] = PAUSE_MIN
+
+
+func _collect_pois(
+	out: Array, pois: Array, start: Vector2i, last_kind: String,
+	kinds: Array, require_new_kind: bool
+) -> void:
+	for poi in pois:
+		var kind := str(poi["kind"])
+		if kind not in kinds:
+			continue
+		if Vector2i(poi["gp"]) == start:
+			continue
+		if require_new_kind and last_kind != "" and kind == last_kind:
+			continue
+		out.append(poi)
 
 
 func _bfs(start: Vector2i, goal: Vector2i, spots: Array) -> Array:

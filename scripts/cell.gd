@@ -337,15 +337,21 @@ func _yard_at(p: Vector2, peg_r: float, bush_r: float) -> void:
 	draw_circle(p + Vector2(0.0, -bush_r * 0.35), bush_r, _lit(TileType.YARD_BUSH))
 
 
-func _draw_road() -> void:
-	# Сплошная лента. Без ромба в центре и без шапок на рёбрах — это и были штампы.
-	var c := iso_c + Vector2(0.0, -iso_th * 0.06)
-	var shaded := _has_neighbor(TileType.TREE)
-	var col := _lit(TileType.PATH_SHADE if shaded else TileType.ROAD_COL)
-	var lit := _lit(TileType.ROAD_LIT if not shaded else TileType.PATH_SHADE)
-	var groove := _lit(TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE)
-	var depth_col := col.darkened(0.22)
+func _road_links_from_board() -> Array[String]:
+	# Соседей читаем с Board.tile — edge_* может отставать и давать «планки».
 	var links: Array[String] = []
+	var b := get_parent() as Board
+	var gp := Vector2i(grid_x, grid_y)
+	if b != null:
+		if b.tile_at(gp + Vector2i(0, -1)) == TileType.ROAD:
+			links.append("n")
+		if b.tile_at(gp + Vector2i(1, 0)) == TileType.ROAD:
+			links.append("e")
+		if b.tile_at(gp + Vector2i(0, 1)) == TileType.ROAD:
+			links.append("s")
+		if b.tile_at(gp + Vector2i(-1, 0)) == TileType.ROAD:
+			links.append("w")
+		return links
 	if edge_n == TileType.ROAD:
 		links.append("n")
 	if edge_e == TileType.ROAD:
@@ -354,16 +360,30 @@ func _draw_road() -> void:
 		links.append("s")
 	if edge_w == TileType.ROAD:
 		links.append("w")
+	return links
+
+
+func _draw_road() -> void:
+	# Мостовая заполняет ~70–85% ромба. Не тонкая осевая полоска — на телефоне это «две планки».
+	var c := iso_c + Vector2(0.0, -iso_th * 0.06)
+	var shaded := _has_neighbor(TileType.TREE)
+	var col := _lit(TileType.PATH_SHADE if shaded else TileType.ROAD_COL)
+	var lit := _lit(TileType.ROAD_LIT if not shaded else TileType.PATH_SHADE)
+	var groove := _lit(TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE)
+	var depth_col := col.darkened(0.22)
+	var links := _road_links_from_board()
 	var ghw := iso_hw
 	var ghh := iso_hh
-	# Ось «в глубину» ромба (к дальнему NE).
+	# half_w ≈ 0.38–0.42 * hw → полоса кроет ~76–84% ромба.
+	var near_w := ghw * 0.42
+	var depth_w := ghw * 0.36
 	var depth_dir := Vector2(ghw, -ghh).normalized()
 	if links.is_empty():
-		# Одна лента через клетку вглубь — не квадратная плита.
+		# Изолированная: широкая лента вглубь, не квадратная плита и не тонкий штамп.
 		_road_strip(
-			c - depth_dir * ghw * 0.85,
-			c + depth_dir * ghw * 0.85,
-			ghw * 0.19,
+			c - depth_dir * ghw * 0.95,
+			c + depth_dir * ghw * 0.95,
+			depth_w,
 			depth_col,
 			lit,
 			groove,
@@ -371,59 +391,63 @@ func _draw_road() -> void:
 		)
 		_draw_puddles(c, ghw * 0.9, ghh * 0.9)
 		if _flashing(DvorikSave.VIEW_PATH) and shaded:
-			_road_strip(c - depth_dir * ghw * 0.5, c + depth_dir * ghw * 0.5, ghw * 0.22, _sheen(_flash_a(0.45)), lit, groove, true)
+			_road_strip(c - depth_dir * ghw * 0.55, c + depth_dir * ghw * 0.55, depth_w * 1.05, _sheen(_flash_a(0.45)), lit, groove, true)
 		return
-	# Рукава: от противоположного края клетки через центр далеко в соседа (~½ шага за mid).
+	var has_near := "e" in links or "s" in links
+	var body_s := 0.82 if has_near else 0.74
+	var body_col := col if has_near else depth_col
+	# Тело клетки — залитый ромб (это мостовая, не декоративный «center stamp»).
+	_poly(Iso.diamond(c, ghw * body_s, ghh * body_s), body_col)
+	# Рукава далеко за общее ребро: ноль щели травы между соседями.
 	for e in links:
 		var mid := Iso.edge_mid(c, ghw, ghh, e)
-		var into_nb := c + (mid - c) * 2.0 # центр соседней клетки
-		var end := mid.lerp(into_nb, 0.55) # глубоко на половину шага в соседа
-		var back := c - (mid - c) * 0.95 # назад через свою клетку
+		var into_nb := c + (mid - c) * 2.0
+		var end := mid.lerp(into_nb, 0.78)
+		var back := c - (mid - c) * 0.90
 		var into_depth := e == "n" or e == "w"
-		var half_w := ghw * (0.17 if into_depth else 0.30)
+		var half_w := depth_w if into_depth else near_w
 		var strip_col := depth_col if into_depth else col
 		_road_strip(back, end, half_w, strip_col, lit, groove, into_depth)
-	# Поворот: цельный L-полигон (не два обрубка).
 	if links.size() >= 2:
-		_road_corner_fill(c, ghw, ghh, links, col, depth_col)
+		_road_corner_fill(c, ghw, ghh, links, col, depth_col, near_w, depth_w)
 	_draw_puddles(c, ghw * 0.9, ghh * 0.9)
 	if _flashing(DvorikSave.VIEW_PATH) and shaded:
-		_road_strip(c - depth_dir * ghw * 0.35, c + depth_dir * ghw * 0.35, ghw * 0.24, _sheen(_flash_a(0.45)), lit, groove, true)
+		_poly(Iso.diamond(c, ghw * 0.55, ghh * 0.55), _sheen(_flash_a(0.45)))
 
 
-func _road_corner_fill(c: Vector2, hw: float, hh: float, links: Array[String], col: Color, depth_col: Color) -> void:
-	# Сплошной L: внешний контур из двух рукавов с толщиной.
+func _road_corner_fill(
+	c: Vector2, hw: float, hh: float, links: Array[String],
+	col: Color, depth_col: Color, near_w: float, depth_w: float
+) -> void:
+	# Сплошной L: два рукава ромба залиты одним полигоном.
 	for i in links.size():
 		for j in range(i + 1, links.size()):
 			var ea: String = links[i]
 			var eb: String = links[j]
 			var mid_a := Iso.edge_mid(c, hw, hh, ea)
 			var mid_b := Iso.edge_mid(c, hw, hh, eb)
-			var end_a := c + (mid_a - c) * 2.0
-			var end_b := c + (mid_b - c) * 2.0
-			end_a = mid_a.lerp(end_a, 0.55)
-			end_b = mid_b.lerp(end_b, 0.55)
+			var end_a := mid_a.lerp(c + (mid_a - c) * 2.0, 0.78)
+			var end_b := mid_b.lerp(c + (mid_b - c) * 2.0, 0.78)
 			var da := end_a - c
 			var db := end_b - c
 			if da.length_squared() < 0.01 or db.length_squared() < 0.01:
 				continue
 			var depth_a := ea == "n" or ea == "w"
 			var depth_b := eb == "n" or eb == "w"
-			var wa := hw * (0.17 if depth_a else 0.30)
-			var wb := hw * (0.17 if depth_b else 0.30)
+			var wa := depth_w if depth_a else near_w
+			var wb := depth_w if depth_b else near_w
 			var na := Vector2(-da.y, da.x).normalized() * wa
 			var nb := Vector2(-db.y, db.x).normalized() * wb
-			na = Vector2(na.x, na.y * 0.78)
-			nb = Vector2(nb.x, nb.y * 0.78)
-			# Шестиугольник L: конец A → угол снаружи → конец B → внутрь.
-			var fill := depth_col if (depth_a or depth_b) else col
+			na = Vector2(na.x, na.y * 0.88)
+			nb = Vector2(nb.x, nb.y * 0.88)
+			var fill := depth_col if (depth_a and depth_b) else col
 			_poly(PackedVector2Array([
 				end_a + na,
 				end_a - na,
-				c - na * 0.15 - nb * 0.15,
+				c - na * 0.1 - nb * 0.1,
 				end_b - nb,
 				end_b + nb,
-				c + na * 0.35 + nb * 0.35,
+				c + na * 0.45 + nb * 0.45,
 			]), fill)
 
 
@@ -432,13 +456,13 @@ func _road_strip(a: Vector2, b: Vector2, half_w: float, col: Color, lit: Color, 
 	if d.length_squared() < 0.01:
 		return
 	var n := Vector2(-d.y, d.x).normalized() * half_w
-	# Вглубь сильнее сплющиваем по экрану Y — лента уходит в ромб, не горизонтальный брус.
-	var squash := 0.55 if into_depth else 0.82
+	# Лёгкое сплющивание — полоса остаётся широкой заливкой, не «планкой».
+	var squash := 0.78 if into_depth else 0.92
 	n = Vector2(n.x, n.y * squash)
 	var pts := PackedVector2Array([a + n, b + n, b - n, a - n])
 	_poly(pts, col)
-	draw_line(a + n * 0.4, b + n * 0.4, lit, 1.6 if into_depth else 2.0)
-	draw_line(a, b, groove, 1.0 if into_depth else 1.3)
+	draw_line(a + n * 0.35, b + n * 0.35, lit, 2.0 if into_depth else 2.4)
+	draw_line(a, b, groove, 1.1 if into_depth else 1.4)
 
 
 func _draw_puddles(c: Vector2, hw: float, hh: float) -> void:

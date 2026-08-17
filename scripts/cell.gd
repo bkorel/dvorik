@@ -135,7 +135,8 @@ func _flashing(view_id: String) -> bool:
 func _draw() -> void:
 	if iso_hw <= 0.0 or iso_hh <= 0.0:
 		return
-	_draw_earth()
+	# Землю рисует Board ниже всех фишек — иначе соседняя трава
+	# перекрывает стены дома и стыки дорог (на телефоне: «скелет» и штампы).
 	match tile:
 		TileType.HOUSE:
 			_draw_house()
@@ -168,87 +169,103 @@ func _has_neighbor(t: int) -> bool:
 func _poly(pts: PackedVector2Array, col: Color) -> void:
 	if pts.size() < 3:
 		return
+	# На мобильном GL Compatibility надёжнее треугольники, не сырой quad.
+	if pts.size() == 3:
+		draw_colored_polygon(pts, col)
+		return
+	if pts.size() == 4:
+		draw_colored_polygon(PackedVector2Array([pts[0], pts[1], pts[2]]), col)
+		draw_colored_polygon(PackedVector2Array([pts[0], pts[2], pts[3]]), col)
+		return
 	draw_colored_polygon(pts, col)
 
 
 func _draw_earth() -> void:
-	# Земля/трава с толщиной. Сетка не главный рисунок — без жёсткой шахматки.
-	var c := iso_c
-	var hw := iso_hw * 1.02
-	var hh := iso_hh * 1.02
-	var th := iso_th
-	var top := Iso.diamond(c, hw, hh)
-	var bot := Iso.diamond(c + Vector2(0.0, th), hw, hh)
-	_poly(PackedVector2Array([top[3], top[2], bot[2], bot[3]]), _lit(TileType.EARTH_LEFT))
-	_poly(PackedVector2Array([top[2], top[1], bot[1], bot[2]]), _lit(TileType.EARTH_RIGHT))
-	var rng := RandomNumberGenerator.new()
-	rng.seed = grid_x * 17 + grid_y * 31 + 4
-	var top_col := TileType.EARTH_TOP.lerp(TileType.EARTH_TOP_ALT, rng.randf() * 0.35)
-	_poly(top, _lit(top_col))
-	for i in 2:
-		var t := rng.randf_range(0.2, 0.8)
-		var u := rng.randf_range(0.2, 0.8)
-		var p := top[0] * (1.0 - t) * (1.0 - u) + top[1] * t * (1.0 - u) + top[2] * t * u + top[3] * (1.0 - t) * u
-		draw_line(p, p + Vector2(rng.randf_range(-1.2, 1.2), -rng.randf_range(1.8, 3.8)), _lit(TileType.EARTH_EDGE), 1.0)
+	# Земля рисуется с Board (см. Board._draw_earth_cell).
+	pass
 
 
 func _draw_house() -> void:
+	# Непрозрачный объём как фишка палитры: стены, дверь, 2 окна, крыша, труба.
 	var c := iso_c
-	var hw := iso_hw * 0.72
-	var hh := iso_hh * 0.72
-	var wall_h := iso_th * 2.35
-	var base := c + Vector2(0.0, iso_th * 0.15)
-	var foot := base + Vector2(0.0, wall_h)
-	# Тень.
-	_poly(Iso.diamond(foot + Vector2(3, 2), hw * 1.05, hh * 1.05), TileType.SHADOW)
-	# Стены: левая (SW) и правая (SE).
-	var tl := base + Vector2(-hw, 0.0)
-	var tr := base + Vector2(hw, 0.0)
-	var tb := base + Vector2(0.0, hh)
+	var hw := iso_hw * 0.74
+	var hh := iso_hh * 0.74
+	var wall_h := maxf(iso_th * 2.8, iso_hw * 0.85)
+	var base := c + Vector2(0.0, iso_th * 0.02)
 	var tn := base + Vector2(0.0, -hh)
-	var fl := foot + Vector2(-hw, 0.0)
-	var fr := foot + Vector2(hw, 0.0)
-	var fb := foot + Vector2(0.0, hh)
-	_poly(PackedVector2Array([tl, tb, fb, fl]), _lit(TileType.WALL_SIDE))
-	_poly(PackedVector2Array([tr, tb, fb, fr]), _lit(TileType.WALL_FRONT))
-	# Дверь на передней (SE) грани — читается с телефона.
-	var door_w := hw * 0.36
-	var door_h := wall_h * 0.68
-	var door_c := tb.lerp(fb, 0.52) + Vector2(hw * 0.20, 0.0)
-	_poly(PackedVector2Array([
-		door_c + Vector2(-door_w * 0.4, -door_h),
-		door_c + Vector2(door_w * 0.55, -door_h * 0.9),
-		door_c + Vector2(door_w * 0.55, door_h * 0.08),
-		door_c + Vector2(-door_w * 0.4, door_h * 0.18),
-	]), _lit(TileType.DOOR))
-	draw_circle(door_c + Vector2(door_w * 0.28, -door_h * 0.25), 2.0, _lit(TileType.DOOR_EDGE))
-	# Два окна: боковая стена + фасад — крупные, голубые.
-	_window_at(tl.lerp(tb, 0.42) + Vector2(hw * 0.02, -wall_h * 0.48), hw * 0.22)
-	_window_at(tr.lerp(tb, 0.40) + Vector2(hw * 0.06, -wall_h * 0.52), hw * 0.20)
-
-	# Крыша: два ската. Улочка — отдельные коньки / общий конёк, не длинный брусок.
-	var ridge_h := wall_h * 0.55
+	var te := base + Vector2(hw, 0.0)
+	var ts := base + Vector2(0.0, hh)
+	var tw := base + Vector2(-hw, 0.0)
+	var bn := tn + Vector2(0.0, wall_h)
+	var be := te + Vector2(0.0, wall_h)
+	var bs := ts + Vector2(0.0, wall_h)
+	var bw := tw + Vector2(0.0, wall_h)
+	_poly(Iso.diamond(base + Vector2(4.0, wall_h + 3.0), hw * 1.08, hh * 1.08), TileType.SHADOW)
+	# Крышка стен (под крышей) — закрывает «дырку» сверху.
+	_poly(Iso.diamond(base, hw * 0.98, hh * 0.98), _lit(TileType.WALL_DARK))
+	# Все четыре грани — непрозрачные.
+	_poly(PackedVector2Array([tn, tw, bw, bn]), _lit(TileType.WALL_DARK))
+	_poly(PackedVector2Array([tn, te, be, bn]), _lit(TileType.WALL_SIDE))
+	_poly(PackedVector2Array([tw, ts, bs, bw]), _lit(TileType.WALL_SIDE))
+	_poly(PackedVector2Array([te, ts, bs, be]), _lit(TileType.WALL_FRONT))
+	# Дверь на SE.
+	var d0 := ts.lerp(te, 0.16).lerp(bs.lerp(be, 0.16), 0.08)
+	var d1 := ts.lerp(te, 0.55).lerp(bs.lerp(be, 0.55), 0.08)
+	var d2 := ts.lerp(te, 0.55).lerp(bs.lerp(be, 0.55), 0.94)
+	var d3 := ts.lerp(te, 0.16).lerp(bs.lerp(be, 0.16), 0.94)
+	_poly(PackedVector2Array([d0, d1, d2, d3]), _lit(TileType.DOOR))
+	draw_circle(d1.lerp(d2, 0.40) + (d0 - d1) * 0.15, 2.4, _lit(TileType.DOOR_EDGE))
+	# Два окна.
+	_window_on_face(tw, ts, bw, bs, 0.40, 0.28, hw * 0.24)
+	_window_on_face(te, ts, be, bs, 0.45, 0.26, hw * 0.22)
+	var ridge_h := wall_h * 0.62
 	var peak := tn + Vector2(0.0, -ridge_h)
 	if has_street_edge():
 		_draw_street_roofs(base, hw, hh, wall_h, peak)
 	else:
-		_poly(PackedVector2Array([peak, tn, tr]), _lit(TileType.ROOF_LIT))
-		_poly(PackedVector2Array([peak, tn, tl]), _lit(TileType.ROOF_SHADE))
-		draw_line(peak, tn, _lit(TileType.ROOF_RIDGE), 2.0)
-		# Труба.
-		var ch := peak + Vector2(hw * 0.22, ridge_h * 0.25)
-		draw_rect(Rect2(ch.x - 2.5, ch.y - 10.0, 5.0, 12.0), _lit(TileType.CHIMNEY))
-		draw_rect(Rect2(ch.x - 3.5, ch.y - 12.0, 7.0, 3.0), _lit(TileType.CHIMNEY_TOP))
+		_poly(PackedVector2Array([peak, tn, te]), _lit(TileType.ROOF_LIT))
+		_poly(PackedVector2Array([peak, tn, tw]), _lit(TileType.ROOF_SHADE))
+		draw_line(peak, tn, _lit(TileType.ROOF_RIDGE), 2.4)
+		var ch := peak + Vector2(hw * 0.30, ridge_h * 0.20)
+		draw_rect(Rect2(ch.x - 3.0, ch.y - 12.0, 6.0, 14.0), _lit(TileType.CHIMNEY))
+		draw_rect(Rect2(ch.x - 4.0, ch.y - 14.0, 8.0, 3.4), _lit(TileType.CHIMNEY_TOP))
 	_draw_porches(base, hw, hh)
 	_draw_yards(base, hw, hh)
 
 
+func _window_on_face(top_a: Vector2, top_b: Vector2, bot_a: Vector2, bot_b: Vector2, across: float, up: float, s: float) -> void:
+	var top := top_a.lerp(top_b, across)
+	var bot := bot_a.lerp(bot_b, across)
+	var mid := top.lerp(bot, up)
+	var along := (top_b - top_a)
+	if along.length_squared() < 0.01:
+		return
+	var tangent := along.normalized() * s
+	var down_v := bot - top
+	if down_v.length_squared() < 0.01:
+		return
+	var down := down_v.normalized() * s * 0.9
+	var p0 := mid - tangent * 0.55 - down * 0.1
+	var p1 := mid + tangent * 0.55 - down * 0.1
+	var p2 := mid + tangent * 0.55 + down * 0.9
+	var p3 := mid - tangent * 0.55 + down * 0.9
+	_poly(PackedVector2Array([p0, p1, p2, p3]), _lit(TileType.WINDOW_FRAME))
+	var ctr := (p0 + p1 + p2 + p3) * 0.25
+	_poly(PackedVector2Array([
+		p0.lerp(ctr, 0.30),
+		p1.lerp(ctr, 0.30),
+		p2.lerp(ctr, 0.30),
+		p3.lerp(ctr, 0.30),
+	]), _lit(TileType.WINDOW))
+	draw_line(p0.lerp(ctr, 0.30).lerp(p1.lerp(ctr, 0.30), 0.5), p3.lerp(ctr, 0.30).lerp(p2.lerp(ctr, 0.30), 0.5), _lit(TileType.WINDOW_FRAME), 1.1)
+	draw_line(p0.lerp(ctr, 0.30).lerp(p3.lerp(ctr, 0.30), 0.5), p1.lerp(ctr, 0.30).lerp(p2.lerp(ctr, 0.30), 0.5), _lit(TileType.WINDOW_FRAME), 1.1)
+
+
 func _window_at(p: Vector2, s: float) -> void:
+	# Совместимость; основное окно — _window_on_face.
 	var r := Rect2(p.x - s, p.y - s * 0.7, s * 2.0, s * 1.4)
 	draw_rect(r.grow(1.2), _lit(TileType.WINDOW_FRAME))
 	draw_rect(r, _lit(TileType.WINDOW))
-	draw_line(Vector2(r.get_center().x, r.position.y), Vector2(r.get_center().x, r.end.y), _lit(TileType.WINDOW_FRAME), 1.0)
-	draw_line(Vector2(r.position.x, r.get_center().y), Vector2(r.end.x, r.get_center().y), _lit(TileType.WINDOW_FRAME), 1.0)
 
 
 func _draw_street_roofs(base: Vector2, hw: float, hh: float, wall_h: float, _peak: Vector2) -> void:
@@ -323,38 +340,77 @@ func _yard_at(p: Vector2, peg_r: float, bush_r: float) -> void:
 
 
 func _draw_road() -> void:
-	# Полосы к ортогональным соседям-дорогам; изгиб в стыке, не отдельный тип.
-	# «Вертикаль» (N/W) уходит в глубину — уже и темнее, не тот же горизонтальный штамп.
-	var c := iso_c + Vector2(0.0, -iso_th * 0.15)
-	var hw := iso_hw * 0.92
-	var hh := iso_hh * 0.92
+	# Нештамп: сплошная поверхность + рукава к соседям. Бока только на открытых рёбрах.
+	var c := iso_c + Vector2(0.0, -iso_th * 0.10)
+	var hw := iso_hw * 0.90
+	var hh := iso_hh * 0.90
+	var th := iso_th * 0.45
 	var shaded := _has_neighbor(TileType.TREE)
 	var col := _lit(TileType.PATH_SHADE if shaded else TileType.ROAD_COL)
 	var lit := _lit(TileType.ROAD_LIT if not shaded else TileType.PATH_SHADE)
 	var groove := _lit(TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE)
-	var depth_col := col.darkened(0.12)
+	var depth_col := col.darkened(0.16)
+	var join_n := edge_n == TileType.ROAD
+	var join_e := edge_e == TileType.ROAD
+	var join_s := edge_s == TileType.ROAD
+	var join_w := edge_w == TileType.ROAD
+	# Чуть раздуваем к соседям-дорогам — шов пропадает.
+	var sx := 1.0
+	var sy := 1.0
+	if join_n or join_e:
+		sx = maxf(sx, 1.08)
+		sy = maxf(sy, 1.08)
+	if join_s or join_w:
+		sx = maxf(sx, 1.08)
+		sy = maxf(sy, 1.08)
+	var top := Iso.diamond(c, hw * sx, hh * sy)
+	var bot := Iso.diamond(c + Vector2(0.0, th), hw * sx, hh * sy)
+	# Бока только там, где нет дороги-соседа (иначе «штампы»).
+	if not join_w and not join_s:
+		_poly(PackedVector2Array([top[3], top[2], bot[2], bot[3]]), _lit(TileType.ROAD_SHADE))
+	elif not join_s:
+		# Частичный бок — рисуем тонкую кромку у переднего ребра.
+		draw_line(top[2], bot[2], _lit(TileType.ROAD_SHADE), 2.0)
+	if not join_e and not join_s:
+		_poly(PackedVector2Array([top[2], top[1], bot[1], bot[2]]), groove)
+	_poly(top, col)
+	# Мосты одного цвета через общие рёбра.
+	if join_n:
+		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "n"), hw * 0.50, hh * 0.50), col)
+	if join_e:
+		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "e"), hw * 0.50, hh * 0.50), col)
+	if join_s:
+		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "s"), hw * 0.50, hh * 0.50), col)
+	if join_w:
+		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "w"), hw * 0.50, hh * 0.50), col)
 	var links: Array[String] = []
-	if edge_n == TileType.ROAD:
+	if join_n:
 		links.append("n")
-	if edge_e == TileType.ROAD:
+	if join_e:
 		links.append("e")
-	if edge_s == TileType.ROAD:
+	if join_s:
 		links.append("s")
-	if edge_w == TileType.ROAD:
+	if join_w:
 		links.append("w")
 	if links.is_empty():
-		# Одинокая плита — полоса в глубину (к дальнему ребру).
-		_road_strip(c + Vector2(-hw * 0.15, hh * 0.25), c + Vector2(hw * 0.35, -hh * 0.25), hw * 0.26, depth_col, lit, groove)
+		# Одинокая: полоса уходит в глубину.
+		_road_strip(c + Vector2(-hw * 0.22, hh * 0.30), c + Vector2(hw * 0.45, -hh * 0.35), hw * 0.20, depth_col, lit, groove)
 	else:
-		_poly(Iso.diamond(c, hw * 0.24, hh * 0.24), col)
+		# Узел + рукава: N/W уже и темнее (вглубь), E/S шире.
+		_poly(Iso.diamond(c, hw * 0.18, hh * 0.18), lit)
 		for e in links:
 			var into_depth := e == "n" or e == "w"
-			var half := hw * (0.24 if into_depth else 0.32)
-			var strip_col := depth_col if into_depth else col
-			_road_strip(c, Iso.edge_mid(c, hw, hh, e), half, strip_col, lit, groove)
+			_road_strip(
+				c,
+				Iso.edge_mid(c, hw, hh, e),
+				hw * (0.17 if into_depth else 0.28),
+				depth_col if into_depth else lit,
+				lit,
+				groove
+			)
 	_draw_puddles(c, hw, hh)
 	if _flashing(DvorikSave.VIEW_PATH) and shaded:
-		_poly(Iso.diamond(c, hw * 0.35, hh * 0.35), _sheen(_flash_a(0.55)))
+		_poly(Iso.diamond(c, hw * 0.40, hh * 0.40), _sheen(_flash_a(0.55)))
 
 
 func _road_strip(a: Vector2, b: Vector2, half_w: float, col: Color, lit: Color, groove: Color) -> void:

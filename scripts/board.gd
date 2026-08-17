@@ -90,11 +90,13 @@ func _relayout() -> void:
 		cell.iso_hh = iso_hh
 		cell.iso_th = iso_th
 		cell.iso_c = Vector2(cell_w * 0.5, cell_h * 0.42)
-		cell.z_index = Iso.depth_key(cell.grid_x, cell.grid_y)
+		# Фишки выше всей земли (земля на Board._draw).
+		cell.z_index = 100 + Iso.depth_key(cell.grid_x, cell.grid_y)
 		cell.sync_home(top_left)
 		cell.queue_redraw()
 	_update_pond_props()
 	if _walkers != null:
+		_walkers.z_index = 400
 		_walkers.queue_redraw()
 	queue_redraw()
 
@@ -104,7 +106,6 @@ func grid_to_board_pos(gx: float, gy: float) -> Vector2:
 
 
 func _draw() -> void:
-	# Мягкий воздух двора — не плоская схема.
 	if size.x <= 0.0 or size.y <= 0.0:
 		return
 	var top := TileType.SKY_TOP
@@ -114,6 +115,45 @@ func _draw() -> void:
 		var y0 := size.y * t
 		var y1 := size.y * (float(i + 1) / 7.0)
 		draw_rect(Rect2(0.0, y0, size.x, y1 - y0 + 1.0), top.lerp(bot, t))
+	# Земля целиком под фишками — иначе соседняя трава ест стены/стыки дорог.
+	if iso_hw <= 0.0:
+		return
+	var ordered: Array[Cell] = _cells.duplicate()
+	ordered.sort_custom(func(a: Cell, b: Cell) -> bool:
+		return Iso.depth_key(a.grid_x, a.grid_y) < Iso.depth_key(b.grid_x, b.grid_y)
+	)
+	for cell in ordered:
+		_draw_earth_cell(cell)
+
+
+func _draw_earth_cell(cell: Cell) -> void:
+	var c := grid_to_board_pos(cell.grid_x, cell.grid_y)
+	var hw := iso_hw * 1.02
+	var hh := iso_hh * 1.02
+	var th := iso_th
+	var top := Iso.diamond(c, hw, hh)
+	var bot := Iso.diamond(c + Vector2(0.0, th), hw, hh)
+	_earth_poly(PackedVector2Array([top[3], top[2], bot[2], bot[3]]), TileType.EARTH_LEFT)
+	_earth_poly(PackedVector2Array([top[2], top[1], bot[1], bot[2]]), TileType.EARTH_RIGHT)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = cell.grid_x * 17 + cell.grid_y * 31 + 4
+	var top_col := TileType.EARTH_TOP.lerp(TileType.EARTH_TOP_ALT, rng.randf() * 0.35)
+	_earth_poly(top, top_col)
+	for i in 2:
+		var t := rng.randf_range(0.2, 0.8)
+		var u := rng.randf_range(0.2, 0.8)
+		var p := top[0] * (1.0 - t) * (1.0 - u) + top[1] * t * (1.0 - u) + top[2] * t * u + top[3] * (1.0 - t) * u
+		draw_line(p, p + Vector2(rng.randf_range(-1.2, 1.2), -rng.randf_range(1.8, 3.8)), TileType.EARTH_EDGE, 1.0)
+
+
+func _earth_poly(pts: PackedVector2Array, col: Color) -> void:
+	if pts.size() < 3:
+		return
+	if pts.size() == 4:
+		draw_colored_polygon(PackedVector2Array([pts[0], pts[1], pts[2]]), col)
+		draw_colored_polygon(PackedVector2Array([pts[0], pts[2], pts[3]]), col)
+		return
+	draw_colored_polygon(pts, col)
 
 
 func bind_palette(palette: Palette) -> void:

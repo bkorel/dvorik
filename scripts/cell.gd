@@ -218,19 +218,48 @@ func _draw_house() -> void:
 	# Два окна.
 	_window_on_face(tw, ts, bw, bs, 0.40, 0.28, hw * 0.24)
 	_window_on_face(te, ts, be, bs, 0.45, 0.26, hw * 0.22)
-	var ridge_h := wall_h * 0.62
-	var peak := tn + Vector2(0.0, -ridge_h)
-	if has_street_edge():
-		_draw_street_roofs(base, hw, hh, wall_h, peak)
-	else:
-		_poly(PackedVector2Array([peak, tn, te]), _lit(TileType.ROOF_LIT))
-		_poly(PackedVector2Array([peak, tn, tw]), _lit(TileType.ROOF_SHADE))
-		draw_line(peak, tn, _lit(TileType.ROOF_RIDGE), 2.4)
-		var ch := peak + Vector2(hw * 0.30, ridge_h * 0.20)
-		draw_rect(Rect2(ch.x - 3.0, ch.y - 12.0, 6.0, 14.0), _lit(TileType.CHIMNEY))
-		draw_rect(Rect2(ch.x - 4.0, ch.y - 14.0, 8.0, 3.4), _lit(TileType.CHIMNEY_TOP))
+	# Двускатная крыша (конёк), не пирамида/палатка.
+	_draw_gabled_roof(tn, te, ts, tw, wall_h)
 	_draw_porches(base, hw, hh)
 	_draw_yards(base, hw, hh)
+
+
+func _draw_gabled_roof(tn: Vector2, te: Vector2, ts: Vector2, tw: Vector2, wall_h: float) -> void:
+	# Двускатная крыша с ГОРИЗОНТАЛЬНЫМ коньком (W–E).
+	# Не пирамида: два ската + два фронтона, конёк — линия, не точка.
+	var base := (tn + te + ts + tw) * 0.25
+	var ridge_h := wall_h * 0.58
+	var half := (te.x - tw.x) * 0.48
+	var ridge_l := Vector2(base.x - half, base.y - ridge_h)
+	var ridge_r := Vector2(base.x + half, base.y - ridge_h)
+	# Фронтоны (торцы) — цвет стены, треугольники; не путать со скатом.
+	_poly(PackedVector2Array([ridge_l, tn, tw]), _lit(TileType.WALL_SIDE))
+	_poly(PackedVector2Array([ridge_l, ts, tw]), _lit(TileType.WALL_SIDE))
+	_poly(PackedVector2Array([ridge_r, tn, te]), _lit(TileType.WALL_FRONT))
+	_poly(PackedVector2Array([ridge_r, ts, te]), _lit(TileType.WALL_FRONT))
+	# Два ската: северный (зад) и южный (перед).
+	_poly(PackedVector2Array([ridge_l, ridge_r, tn]), _lit(TileType.ROOF_SHADE))
+	_poly(PackedVector2Array([ridge_l, ridge_r, ts]), _lit(TileType.ROOF_LIT))
+	# Конёк — явная линия поперёк, не вертикальный штырь.
+	draw_line(ridge_l, ridge_r, _lit(TileType.ROOF_RIDGE), maxf(3.5, iso_hw * 0.08))
+	# Труба на переднем скате, смещена от конька.
+	_draw_chimney_on_slope(ridge_l, ridge_r, ts, tn)
+
+
+func _draw_chimney_on_slope(ridge_l: Vector2, ridge_r: Vector2, ts: Vector2, _tn: Vector2) -> void:
+	# На переднем скате: ближе к правому краю, ниже конька.
+	var on_ridge := ridge_l.lerp(ridge_r, 0.72)
+	var base := on_ridge.lerp(ts, 0.40)
+	var ch_hw := maxf(iso_hw * 0.10, 5.0)
+	var ch_hh := maxf(iso_hh * 0.10, 3.0)
+	var ch_h := maxf(iso_hw * 0.32, 14.0)
+	var top_c := base + Vector2(0.0, -ch_h)
+	var top := Iso.diamond(top_c, ch_hw, ch_hh)
+	var bot := Iso.diamond(base, ch_hw, ch_hh)
+	_poly(PackedVector2Array([bot[3], bot[2], top[2], top[3]]), _lit(TileType.CHIMNEY).darkened(0.15))
+	_poly(PackedVector2Array([bot[2], bot[1], top[1], top[2]]), _lit(TileType.CHIMNEY))
+	_poly(top, _lit(TileType.CHIMNEY_TOP))
+	_poly(Iso.diamond(top_c + Vector2(0.0, -2.0), ch_hw * 1.3, ch_hh * 1.2), _lit(TileType.CHIMNEY_TOP).lightened(0.1))
 
 
 func _window_on_face(top_a: Vector2, top_b: Vector2, bot_a: Vector2, bot_b: Vector2, across: float, up: float, s: float) -> void:
@@ -266,37 +295,6 @@ func _window_at(p: Vector2, s: float) -> void:
 	var r := Rect2(p.x - s, p.y - s * 0.7, s * 2.0, s * 1.4)
 	draw_rect(r.grow(1.2), _lit(TileType.WINDOW_FRAME))
 	draw_rect(r, _lit(TileType.WINDOW))
-
-
-func _draw_street_roofs(base: Vector2, hw: float, hh: float, wall_h: float, _peak: Vector2) -> void:
-	# Два дома рядом: два объёма крыш. На общем ребре — стык коньков, не одна планка.
-	var ridge_h := wall_h * 0.48
-	var tn := base + Vector2(0.0, -hh)
-	var tl := base + Vector2(-hw, 0.0)
-	var tr := base + Vector2(hw, 0.0)
-	var peak_a := tn + Vector2(-hw * 0.28, -ridge_h)
-	var peak_b := tn + Vector2(hw * 0.28, -ridge_h)
-	if edge_n == TileType.HOUSE or edge_w == TileType.HOUSE:
-		peak_a = tn + Vector2(-hw * 0.12, -ridge_h * 0.9)
-	if edge_e == TileType.HOUSE or edge_s == TileType.HOUSE:
-		peak_b = tn + Vector2(hw * 0.12, -ridge_h * 0.9)
-	_poly(PackedVector2Array([peak_a, tn, tl]), _lit(TileType.ROOF_SHADE))
-	_poly(PackedVector2Array([peak_a, tn, base]), _lit(TileType.ROOF_LIT))
-	_poly(PackedVector2Array([peak_b, tn, tr]), _lit(TileType.ROOF_LIT))
-	_poly(PackedVector2Array([peak_b, tn, base]), _lit(TileType.ROOF_SHADE))
-	draw_line(peak_a, tn, _lit(TileType.ROOF_RIDGE), 1.8)
-	draw_line(peak_b, tn, _lit(TileType.ROOF_RIDGE), 1.8)
-	if edge_n == TileType.HOUSE:
-		draw_line(peak_a, peak_a + Vector2(iso_hw * 0.35, -iso_hh * 0.2), _lit(TileType.ROOF_RIDGE), 2.2)
-	if edge_e == TileType.HOUSE:
-		draw_line(peak_b, peak_b + Vector2(iso_hw * 0.35, iso_hh * 0.2), _lit(TileType.ROOF_RIDGE), 2.2)
-	if edge_s == TileType.HOUSE:
-		draw_line(peak_b, peak_b + Vector2(-iso_hw * 0.35, iso_hh * 0.2), _lit(TileType.ROOF_RIDGE), 2.2)
-	if edge_w == TileType.HOUSE:
-		draw_line(peak_a, peak_a + Vector2(-iso_hw * 0.35, -iso_hh * 0.2), _lit(TileType.ROOF_RIDGE), 2.2)
-	var ch := peak_b + Vector2(4.0, 4.0)
-	draw_rect(Rect2(ch.x - 2.2, ch.y - 9.0, 4.5, 11.0), _lit(TileType.CHIMNEY))
-	draw_rect(Rect2(ch.x - 3.2, ch.y - 11.0, 6.5, 2.8), _lit(TileType.CHIMNEY_TOP))
 
 
 func _draw_porches(base: Vector2, hw: float, hh: float) -> void:
@@ -340,49 +338,18 @@ func _yard_at(p: Vector2, peg_r: float, bush_r: float) -> void:
 
 
 func _draw_road() -> void:
-	# Нештамп: сплошная поверхность + рукава к соседям. Бока только на открытых рёбрах.
-	var c := iso_c + Vector2(0.0, -iso_th * 0.10)
-	var hw := iso_hw * 0.90
-	var hh := iso_hh * 0.90
-	var th := iso_th * 0.45
+	# Лента по рёбрам сетки (iso_hw/hh), не плита-штамп на клетку.
+	# Координаты стыка = те же, что у соседа → шов без щели.
+	var c := iso_c + Vector2(0.0, -iso_th * 0.08)
 	var shaded := _has_neighbor(TileType.TREE)
 	var col := _lit(TileType.PATH_SHADE if shaded else TileType.ROAD_COL)
 	var lit := _lit(TileType.ROAD_LIT if not shaded else TileType.PATH_SHADE)
 	var groove := _lit(TileType.PATH_GROOVE if shaded else TileType.ROAD_GROOVE)
-	var depth_col := col.darkened(0.16)
+	var depth_col := col.darkened(0.20)
 	var join_n := edge_n == TileType.ROAD
 	var join_e := edge_e == TileType.ROAD
 	var join_s := edge_s == TileType.ROAD
 	var join_w := edge_w == TileType.ROAD
-	# Чуть раздуваем к соседям-дорогам — шов пропадает.
-	var sx := 1.0
-	var sy := 1.0
-	if join_n or join_e:
-		sx = maxf(sx, 1.08)
-		sy = maxf(sy, 1.08)
-	if join_s or join_w:
-		sx = maxf(sx, 1.08)
-		sy = maxf(sy, 1.08)
-	var top := Iso.diamond(c, hw * sx, hh * sy)
-	var bot := Iso.diamond(c + Vector2(0.0, th), hw * sx, hh * sy)
-	# Бока только там, где нет дороги-соседа (иначе «штампы»).
-	if not join_w and not join_s:
-		_poly(PackedVector2Array([top[3], top[2], bot[2], bot[3]]), _lit(TileType.ROAD_SHADE))
-	elif not join_s:
-		# Частичный бок — рисуем тонкую кромку у переднего ребра.
-		draw_line(top[2], bot[2], _lit(TileType.ROAD_SHADE), 2.0)
-	if not join_e and not join_s:
-		_poly(PackedVector2Array([top[2], top[1], bot[1], bot[2]]), groove)
-	_poly(top, col)
-	# Мосты одного цвета через общие рёбра.
-	if join_n:
-		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "n"), hw * 0.50, hh * 0.50), col)
-	if join_e:
-		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "e"), hw * 0.50, hh * 0.50), col)
-	if join_s:
-		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "s"), hw * 0.50, hh * 0.50), col)
-	if join_w:
-		_poly(Iso.diamond(Iso.edge_mid(c, hw, hh, "w"), hw * 0.50, hh * 0.50), col)
 	var links: Array[String] = []
 	if join_n:
 		links.append("n")
@@ -392,25 +359,50 @@ func _draw_road() -> void:
 		links.append("s")
 	if join_w:
 		links.append("w")
+	# Геометрия стыка — полный шаг сетки.
+	var ghw := iso_hw
+	var ghh := iso_hh
+	if links.size() >= 2:
+		_road_corner_fill(c, ghw, ghh, links, col)
+	_poly(Iso.diamond(c, ghw * 0.30, ghh * 0.30), lit)
 	if links.is_empty():
-		# Одинокая: полоса уходит в глубину.
-		_road_strip(c + Vector2(-hw * 0.22, hh * 0.30), c + Vector2(hw * 0.45, -hh * 0.35), hw * 0.20, depth_col, lit, groove)
+		_road_strip(
+			c + Vector2(-ghw * 0.35, ghh * 0.38),
+			c + Vector2(ghw * 0.55, -ghh * 0.48),
+			ghw * 0.20,
+			depth_col,
+			lit,
+			groove
+		)
 	else:
-		# Узел + рукава: N/W уже и темнее (вглубь), E/S шире.
-		_poly(Iso.diamond(c, hw * 0.18, hh * 0.18), lit)
 		for e in links:
+			# Ровно середина общего ребра (+ небольшой вылет на перекрытие).
+			var end := Iso.edge_mid(c, ghw, ghh, e)
+			var over := (end - c) * 0.20
+			end = end + over
 			var into_depth := e == "n" or e == "w"
 			_road_strip(
 				c,
-				Iso.edge_mid(c, hw, hh, e),
-				hw * (0.17 if into_depth else 0.28),
-				depth_col if into_depth else lit,
+				end,
+				ghw * (0.20 if into_depth else 0.34),
+				depth_col if into_depth else col,
 				lit,
 				groove
 			)
-	_draw_puddles(c, hw, hh)
+			# Шапка стыка — оба соседа рисуют одно пятно.
+			_poly(Iso.diamond(Iso.edge_mid(c, ghw, ghh, e), ghw * 0.28, ghh * 0.28), depth_col if into_depth else col)
+	_draw_puddles(c, ghw * 0.9, ghh * 0.9)
 	if _flashing(DvorikSave.VIEW_PATH) and shaded:
-		_poly(Iso.diamond(c, hw * 0.40, hh * 0.40), _sheen(_flash_a(0.55)))
+		_poly(Iso.diamond(c, ghw * 0.32, ghh * 0.32), _sheen(_flash_a(0.55)))
+
+
+func _road_corner_fill(c: Vector2, hw: float, hh: float, links: Array[String], col: Color) -> void:
+	# Для каждой пары рукавов — треугольник центр–край–край (L без разрыва).
+	for i in links.size():
+		for j in range(i + 1, links.size()):
+			var a := Iso.edge_mid(c, hw, hh, links[i])
+			var b := Iso.edge_mid(c, hw, hh, links[j])
+			_poly(PackedVector2Array([c, a, b]), col)
 
 
 func _road_strip(a: Vector2, b: Vector2, half_w: float, col: Color, lit: Color, groove: Color) -> void:
